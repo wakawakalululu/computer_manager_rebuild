@@ -51,6 +51,6 @@ List<AccelTool> accelerationTools({
             route: '/disk_clean_dashboard/deep_clean_scan'),
     ];
 
-/// 空态文案。原程序给空态留了专门的类（`_AppAccelerationBallBlankEnteryState`），
+/// 空态文案。参考实现给空态留了专门的类（`_AppAccelerationBallBlankEnteryState`），
 /// 但没留下对应的那句话，所以这里只陈述事实，不替它编一句营销话。
 const String accelToolsEmptyMessage = '暂无可执行的加速项';

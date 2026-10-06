@@ -1,14 +1,14 @@
-/// 应用兼容性检查（原程序的 `AppCompatibility_window`）。
+/// 应用兼容性检查（参考实现的 `AppCompatibility_window`）。
 ///
 /// 逆向依据：
 /// - 事件表里的 `click_AppCompatibility_window_uninstall` / `_cancel` / `_never`
-///   （`docs/extracted/click_events.txt`）证明原程序有一个会弹窗、可一键卸载的
+///   （`docs/extracted/click_events.txt`）证明参考实现有一个会弹窗、可一键卸载的
 ///   兼容性检查；
 /// - 三句原话：「以下应用可能存在兼容性问题，建议卸载」（`zh_strings.txt:588`）、
 ///   「当安装不兼容应用时，系统将自动触发此提示。」（`:192`）、
 ///   「已安装应用兼容云电脑环境」（`:151`，全干净时的状态行）。
 ///
-/// 关于「不兼容清单从哪来」：原程序那份在运营方后端，逆向产物里没有任何一份
+/// 关于「不兼容清单从哪来」：参考实现那份在运营方后端，逆向产物里没有任何一份
 /// 清单能证明哪些应用被判为不兼容。净室分支**不假装知道这份清单**——判定标准
 /// 改由部署方在随包 `config.ini` 的 `[compat] incompatible` 里给出（与 baseHost
 /// 同一个文件、同一种「运维填」的处理方式）。清单为空时这一项就是「未配置」，
@@ -45,7 +45,7 @@ List<AppEntry> findIncompatibleApps(
       .toList();
 }
 
-/// 弹窗正文。标题与那句「建议卸载」都用原程序自带的串。
+/// 弹窗正文。标题与那句「建议卸载」都用参考实现自带的串。
 /// 只列名字不列版本：弹窗正文只有三行余地，版本号在这里没有判断价值。
 const String kCompatTitle = '应用兼容性';
 const String kCompatBodyHead = '以下应用可能存在兼容性问题，建议卸载';

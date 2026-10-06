@@ -8,7 +8,7 @@ import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// 悬浮球 = 原程序的「加速球」：实时看内存占用，点一下释放内存。
+/// 悬浮球 = 参考实现的「加速球」：实时看内存占用，点一下释放内存。
 /// 单独成文件：`TestWidgetsFlutterBinding` 会接管 HttpClient（所有真实请求一律回
 /// 400），真 socket 的上测与 widget 测试放一起必然互相打架。
 void main() {

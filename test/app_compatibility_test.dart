@@ -80,7 +80,7 @@ void main() {
       ]);
     });
 
-    test('三句文案都取原程序自带的串', () {
+    test('三句文案都取参考实现自带的串', () {
       expect(kCompatBodyHead, '以下应用可能存在兼容性问题，建议卸载');
       expect(kCompatCleanMessage, '已安装应用兼容云电脑环境');
     });

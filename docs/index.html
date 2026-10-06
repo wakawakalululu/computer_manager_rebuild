@@ -1,14 +1,177 @@
-# PC Manager
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC Manager — Windows 桌面系统管理工具（Flutter + Rust）</title>
+<meta name="description" content="PC Manager：Windows 桌面系统管理工具。实时监控、进程与启动项管理、winapp2 规则深度清理、大文件/重复文件扫描、网速测试与补丁检测。Flutter + Rust 构建，MIT 许可。">
+<meta property="og:title" content="PC Manager">
+<meta property="og:description" content="Windows 桌面系统管理工具 — Flutter + Rust">
+<meta property="og:image" content="assets/banner.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<style>
+  :root{
+    --bg:#0b1526; --bg2:#0e1c33; --card:#12233c; --line:#1f3a5f;
+    --text:#e6edf6; --muted:#9db2c9; --brand:#3b82f6; --brand2:#60a5fa;
+    --ok:#34d399; --warn:#f59e0b; --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.65}
+  a{color:var(--brand2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
 
-Windows 桌面系统管理工具 — Flutter + Rust (flutter_rust_bridge v2)。
+  /* nav */
+  nav{position:sticky;top:0;z-index:10;background:rgba(11,21,38,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;gap:20px;height:58px}
+  nav .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--text)}
+  nav .brand img{width:26px;height:26px;border-radius:7px}
+  nav .sp{flex:1}
+  nav a.item{color:var(--muted);font-size:14.5px;padding:6px 10px;border-radius:8px}
+  nav a.item:hover{color:var(--text);background:var(--card);text-decoration:none}
+  nav a.gh{display:flex;align-items:center;gap:6px}
 
-- 实时监控仪表盘、进程/启动项管理、应用中心
-- winapp2 规则驱动的深度清理、大文件 / 重复文件扫描
-- 网速测试、补丁检测、资源悬浮窗、托盘常驻
-- 常驻采集 Agent + Windows 保活服务
+  /* hero */
+  header.hero{padding:72px 0 56px;text-align:center;background:
+    radial-gradient(1000px 380px at 50% -80px, rgba(59,130,246,.28), transparent 70%)}
+  header.hero h1{font-size:46px;font-weight:800;letter-spacing:.5px}
+  header.hero h1 span{background:linear-gradient(90deg,var(--brand2),var(--ok));-webkit-background-clip:text;background-clip:text;color:transparent}
+  header.hero p.sub{margin:14px auto 0;max-width:640px;color:var(--muted);font-size:18px}
+  .cta{margin-top:30px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .btn{display:inline-block;padding:12px 26px;border-radius:12px;font-weight:600;font-size:15.5px;border:1px solid var(--line);color:var(--text)}
+  .btn:hover{text-decoration:none;filter:brightness(1.12)}
+  .btn.primary{background:linear-gradient(135deg,var(--brand),#1d4ed8);border-color:transparent;box-shadow:0 8px 24px rgba(59,130,246,.35)}
+  .badges{margin-top:26px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .badges img{height:22px;border-radius:5px}
 
-构建：`flutter build windows --release`（自动集成 Rust 组件）
+  /* sections */
+  section{padding:64px 0;border-top:1px solid var(--line)}
+  section h2{font-size:28px;margin-bottom:6px}
+  section p.lead{color:var(--muted);margin-bottom:30px}
 
-- 仓库：<https://github.com/wakawakalululu/computer_manager_rebuild>
-- Wiki：<https://github.com/wakawakalululu/computer_manager_rebuild/wiki>
-- 许可：MIT
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 18px}
+  .card .ico{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(96,165,250,.14);margin-bottom:12px}
+  .card .ico svg{width:22px;height:22px;stroke:var(--brand2);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .card h3{font-size:16.5px;margin-bottom:6px}
+  .card p{color:var(--muted);font-size:14px}
+
+  pre.code{background:#0a1220;border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;overflow:auto;font-size:14px;line-height:1.7}
+  pre.code .c{color:#64748b}
+  pre.code b{color:#7dd3fc;font-weight:600}
+
+  .mermaid{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-top:8px}
+
+  footer{border-top:1px solid var(--line);padding:34px 0 44px;color:var(--muted);font-size:14px}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center}
+  @media(max-width:640px){header.hero h1{font-size:34px}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="assets/favicon.png" alt="">PC Manager</a>
+    <span class="sp"></span>
+    <a class="item" href="#features">功能</a>
+    <a class="item" href="#architecture">架构</a>
+    <a class="item" href="#quickstart">快速开始</a>
+    <a class="item" href="https://github.com/wakawakalululu/computer_manager_rebuild/wiki">Wiki</a>
+    <a class="item gh" href="https://github.com/wakawakalululu/computer_manager_rebuild">
+      <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>PC <span>Manager</span></h1>
+    <p class="sub">Windows 桌面系统管理工具 —— Flutter 界面 + Rust 核心，经 flutter_rust_bridge v2 无缝集成。监控、清理、工具箱与常驻服务，一个应用全搞定。</p>
+    <div class="cta">
+      <a class="btn primary" href="#quickstart">快速开始</a>
+      <a class="btn" href="https://github.com/wakawakalululu/computer_manager_rebuild">查看源码</a>
+    </div>
+    <div class="badges">
+      <img src="https://img.shields.io/badge/License-MIT-22c55e.svg" alt="MIT">
+      <img src="https://img.shields.io/badge/platform-Windows%2010%2B-0078d4.svg" alt="Windows">
+      <img src="https://img.shields.io/badge/Flutter-3.47-02569B.svg?logo=flutter" alt="Flutter">
+      <img src="https://img.shields.io/badge/Rust-stable-DEA584.svg?logo=rust" alt="Rust">
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <h2>功能特性</h2>
+    <p class="lead">从日常监控到深度清理，覆盖桌面管理的主要场景。</p>
+    <div class="grid">
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+        <h3>实时监控</h3><p>CPU / 内存 / 磁盘 / 网络仪表盘，健康评分与体检面板，异常即时告警。</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></div>
+        <h3>进程与启动项</h3><p>进程列表与结束、启动项启用禁用、开机时长统计。</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12h8M8 8h8M8 16h5"/></svg></div>
+        <h3>应用中心</h3><p>注册表 Uninstall 枚举、应用信息与一键卸载。</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 6h16M6 6l1.5 13h9L18 6M10 10v6M14 10v6M9 6V4h6v2"/></svg></div>
+        <h3>深度清理</h3><p>winapp2 规则引擎、大文件、重复文件（内容指纹）、系统盘分析与回收站。</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v10M8 7l4-4 4 4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg></div>
+        <h3>工具箱</h3><p>网速测试（延迟 / 抖动 / 上下行）、补丁检测（WUSA / DISM / MSI）。</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg></div>
+        <h3>常驻组件</h3><p>资源悬浮窗、托盘菜单窗口、采集 Agent（30s 轮询）与 Windows 保活服务。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="wrap">
+    <h2>架构</h2>
+    <p class="lead">Flutter 界面经 flutter_rust_bridge v2 直连 Rust 核心；常驻组件以独立进程 + Windows 服务运行。</p>
+    <pre class="mermaid">
+flowchart LR
+    subgraph GUI["Flutter GUI（go_router）"]
+      UI["界面 + 服务层"]
+      FW["悬浮窗子引擎"]
+      TM["托盘菜单子引擎"]
+    end
+    UI <== "frb v2 · 95 接口" ==> CORE["rust_lib.dll"]
+    subgraph CORE["Rust 核心"]
+      SYS["sysinfo"] ; SCAN["winapp2 引擎"] ; WMI["WMI / 注册表"]
+    end
+    subgraph RESIDENT["常驻组件"]
+      KA["CmKeepAlive 服务"] --> AGENT["cm_agent.exe"]
+    end
+    UI -- "2s send_data 推送" --> FW
+    </pre>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <h2>快速开始</h2>
+    <p class="lead">Flutter stable（Windows 桌面）、Rust stable-msvc、VS Build Tools（C++）。</p>
+    <pre class="code"><span class="c"># 克隆并运行</span>
+<b>git</b> clone https://github.com/wakawakalululu/computer_manager_rebuild.git
+<b>cd</b> computer_manager_rebuild
+
+<b>flutter</b> pub get
+<b>flutter</b> run -d windows          <span class="c"># 调试运行</span>
+<b>flutter</b> build windows --release <span class="c"># 出包（自动构建 Rust 组件）</span></pre>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>© 2026 PC Manager · MIT License</div>
+    <div>
+      <a href="https://github.com/wakawakalululu/computer_manager_rebuild">GitHub</a> ·
+      <a href="https://github.com/wakawakalululu/computer_manager_rebuild/wiki">Wiki</a> ·
+      <a href="https://github.com/wakawakalululu/computer_manager_rebuild/issues">Issues</a>
+    </div>
+  </div>
+</footer>
+
+<script>mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script>
+</body>
+</html>

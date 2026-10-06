@@ -195,6 +195,15 @@ switch ($Action) {
     [UI]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)   # LEFTUP
     Write-Output "clicked $X,$Y"
   }
+  'hold' {
+    # 长按：按下后停 $D 的绝对值毫秒再抬起（Flutter 侧 onLongPress 要 >500ms）
+    [void][UI]::SetCursorPos($X, $Y)
+    Start-Sleep -Milliseconds 120
+    [UI]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero)   # LEFTDOWN
+    Start-Sleep -Milliseconds ([Math]::Abs($D))
+    [UI]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)   # LEFTUP
+    Write-Output "hold $X,$Y for $([Math]::Abs($D))ms"
+  }
   'rclick' {
     # 右键：托盘图标只认右键（原生菜单已换成托盘菜单子窗口），mouse_event 的
     # RIGHTDOWN=0x0008 / RIGHTUP=0x0010。坐标仍是本进程的 DPI 虚拟逻辑空间。

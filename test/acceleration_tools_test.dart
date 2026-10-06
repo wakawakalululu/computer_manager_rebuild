@@ -2,7 +2,7 @@ import 'package:computer_manager/services/acceleration_tools.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// 「加速工具」卡的条目规则：列出来的每一条都必须真的能执行
-///（原程序「隐藏不可操作项」的字面实现）。
+///（参考实现「隐藏不可操作项」的字面实现）。
 void main() {
   test('空闲时只有「一键加速」一条，不摆没意义的条目', () {
     expect(
