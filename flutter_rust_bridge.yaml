@@ -1,0 +1,6 @@
+rust_input: crate::api
+rust_root: rust/
+dart_output: lib/src/rust
+# full_dep: false → PDE 编解码模式，与参考实现二进制中观测到的
+# frb_pde_ffi_dispatcher_primary/_sync 分发器符号一致；同时无需 ffigen/libclang。
+full_dep: false

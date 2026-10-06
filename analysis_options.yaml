@@ -1,0 +1,12 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    unused_element: ignore
+  exclude:
+    - build/**
+    - windows/**
+
+linter:
+  rules:
+    use_build_context_synchronously: false

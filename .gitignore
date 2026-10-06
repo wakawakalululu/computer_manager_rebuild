@@ -1,0 +1,18 @@
+.dart_tool/
+build/
+windows/flutter/ephemeral/
+rust/target/
+*.log
+.idea/
+.vscode/
+
+# Local-only working notes & internal specs (not distributed)
+local_notes/
+docs/extracted/
+
+# Runtime asset drop-ins (place your own; not committed)
+assets/images/*
+!assets/images/.gitkeep
+assets/lottie/*
+!assets/lottie/.gitkeep
+rules/*.ini

@@ -1,0 +1,65 @@
+name: computer_manager
+description: >-
+  PC Manager — a Windows desktop manager built with Flutter and Rust
+  (flutter_rust_bridge v2).
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^2.0.0
+
+  # ── 与参考实现完全同款的原生插件（由其 DLL 清单确认）──────────────
+  window_manager: ^0.5.2            # window_manager_plugin.dll
+  desktop_multi_window: ^0.3.1      # desktop_multi_window_plugin.dll（悬浮窗）
+  tray_manager: ^0.7.0              # tray_manager_plugin.dll
+  screen_retriever: ^0.2.2          # screen_retriever_windows_plugin.dll
+  url_launcher: ^6.3.3              # url_launcher_windows_plugin.dll
+  windows_single_instance: ^1.2.0   # windows_single_instance_plugin.dll
+  wakelock_plus: ^1.8.1             # wakelock_plus（阻止云电脑息屏）
+
+  # ── 参考实现依赖指纹（由 app.so 类名/组件确认）──────────────────
+  flutter_rust_bridge: 2.9.0        # frb v2（与 codegen 版本严格一致）
+  go_router: ^18.0.2                # StatefulNavigationShell/RouteMatchList 证实
+  flutter_smart_dialog: ^5.3.0      # _FlutterSmartDialogState 证实
+  fl_chart: ^1.2.0                  # _LineChartState 证实
+  flutter_widget_from_html_core: ^0.17.4  # HtmlWidget/HtmlListItem 证实
+  lottie: ^3.6.1                    # assets/lottie/*.json
+  shared_preferences: ^2.5.5        # “不再提示”等本地状态
+  intl: ^0.20.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/branding/
+    - assets/images/
+    - assets/images/2.0x/
+    - assets/images/3.0x/
+    - assets/lottie/
+  fonts:
+    - family: SourceHanSansCN
+      fonts:
+        - asset: assets/fonts/SourceHanSansCN-ExtraLight.otf
+          weight: 200
+        - asset: assets/fonts/SourceHanSansCN-Light.otf
+          weight: 300
+        - asset: assets/fonts/SourceHanSansCN-Regular.otf
+          weight: 400
+        - asset: assets/fonts/SourceHanSansCN-Medium.otf
+          weight: 500
+        - asset: assets/fonts/SourceHanSansCN-Bold.otf
+          weight: 700
+        - asset: assets/fonts/SourceHanSansCN-Heavy.otf
+          weight: 900
+    - family: iconfont
+      fonts:
+        - asset: assets/fonts/iconfont.ttf
