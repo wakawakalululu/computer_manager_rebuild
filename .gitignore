@@ -22,3 +22,4 @@ assets/images/3.0x/*
 assets/lottie/*
 !assets/lottie/.gitkeep
 rules/*.ini
+!rules/DeepCleanCacheConfig.ini
