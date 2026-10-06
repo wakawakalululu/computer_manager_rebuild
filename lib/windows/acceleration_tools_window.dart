@@ -27,18 +27,22 @@ Future<void> mainAccelerationToolsWindow(List<String> args) async {
 
   final controller = WindowController.fromWindowId(windowId);
 
-  var items = const <AccelTool>[];
+  /// 条目走 ValueNotifier：`set_slot` 到达时子引擎的 widget 树往往已经建好了，
+  /// 不 notifyListeners 的话窗口按新条目数开了、内容却停在旧列表上
+  /// （第一次实机就是这样：日志算出 2 条，屏幕上仍是空态）。
+  final items = ValueNotifier<List<AccelTool>>(const []);
+
   Future<dynamic> handlePush(MethodCall call) async {
     if (call.method != 'set_slot') return null;
     final m = Map<Object?, Object?>.from(call.arguments as Map);
-    items = (m['tools'] as List)
+    items.value = (m['tools'] as List)
         .cast<Map<Object?, Object?>>()
         .map((t) => AccelTool(
             id: '${t['id']}',
             label: '${t['label']}',
             route: t['route'] as String?))
         .toList();
-    final size = accelToolsLogicalSize(items.length);
+    final size = accelToolsLogicalSize(items.value.length);
     try {
       final request = 'place|${_px(m['x'])}|${_px(m['y'])}'
           '|${_px(m['width'])}|${_px(m['height'])}'
@@ -71,7 +75,7 @@ Future<void> mainAccelerationToolsWindow(List<String> args) async {
   await api.logInfo(
       ready ? '加速工具卡 channel 已就绪' : '加速工具卡 channel 注册超时（native 插件未注册）');
 
-  runApp(_AccelToolsApp(controller: controller, items: () => items));
+  runApp(_AccelToolsApp(controller: controller, items: items));
 }
 
 /// 卡片尺寸：标题一行 + 每条一行；原生按这个逻辑尺寸乘目标显示器 DPI 开窗口，
@@ -110,7 +114,7 @@ class _AccelToolsApp extends StatelessWidget {
   const _AccelToolsApp({required this.controller, required this.items});
 
   final WindowController controller;
-  final List<AccelTool> Function() items;
+  final ValueNotifier<List<AccelTool>> items;
 
   @override
   Widget build(BuildContext context) {
@@ -119,10 +123,13 @@ class _AccelToolsApp extends StatelessWidget {
       theme: AppTheme.light(),
       home: Scaffold(
         backgroundColor: const Color(0xF0141A22),
-        body: AccelToolsBody(
-          tools: items(),
-          onTool: (tool) =>
-              unawaited(_dispatch(controller, tool, items().length)),
+        body: ListenableBuilder(
+          listenable: items,
+          builder: (_, __) => AccelToolsBody(
+            tools: items.value,
+            onTool: (tool) =>
+                unawaited(_dispatch(controller, tool, items.value.length)),
+          ),
         ),
       ),
     );

@@ -8,7 +8,8 @@
   [int]$D = -360,
   [string]$T = '',
   [int]$ProcId = 0,
-  [string]$Out = ''
+  [string]$Out = '',
+  [long]$Hwnd = 0
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -131,6 +132,7 @@ function Find-Target([string]$className) {
     try {
       $cn = New-Object System.Text.StringBuilder 256
       [void][UI]::GetClassName($h, $cn, 256)
+      if ($Hwnd -gt 0 -and [long]$h.ToInt64() -ne $Hwnd) { return `$true }
       if ($cn.ToString() -eq $className -and [UI]::IsWindowVisible($h)) {
         $pid2 = [uint32]0
         [void][UI]::GetWindowThreadProcessId($h, [ref]$pid2)

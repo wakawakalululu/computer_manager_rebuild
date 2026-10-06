@@ -183,7 +183,8 @@ class FeedbackClient {
           ('content', content),
         ],
         fileField: 'feedfile',
-        fileName: Uri.file(logZipPath).pathSegments.last,
+        // 平台无关的 basename：日志 zip 路径可能来自 Windows（\）或 POSIX（/）
+        fileName: logZipPath.split(RegExp(r'[\\/]')).last,
         fileBytes: bytes,
       );
       await _post(target.uri(kFeedFileUploadPath), body,
