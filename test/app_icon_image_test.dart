@@ -21,10 +21,13 @@ void main() {
               body: AppIconImage(
                   displayIcon: 'C:\\fake\\a.exe',
                   loader: (_) async => _blueSquare(2, 3)))));
-      for (var i = 0; i < 20 && find.byType(RawImage).evaluate().isEmpty; i++) {
+      // 解码在 IO 线程完成后才回调挂图，整包跑测时这一步可能被拖到几百毫秒；
+      // 单独跑必过、全量跑偶发失败就是这里的预算不够，不是行为变了。
+      for (var i = 0; i < 100 && find.byType(RawImage).evaluate().isEmpty; i++) {
         await tester.pump(const Duration(milliseconds: 20));
-        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
       }
+      await tester.pump();
       expect(find.byType(RawImage), findsOneWidget);
       final raw = tester.widget<RawImage>(find.byType(RawImage));
       expect(raw.image, isNotNull, reason: '解码结果应挂到 RawImage 上');

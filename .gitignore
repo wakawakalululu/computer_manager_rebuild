@@ -13,6 +13,12 @@ docs/extracted/
 # Runtime asset drop-ins (place your own; not committed)
 assets/images/*
 !assets/images/.gitkeep
+!assets/images/2.0x/
+assets/images/2.0x/*
+!assets/images/2.0x/.gitkeep
+!assets/images/3.0x/
+assets/images/3.0x/*
+!assets/images/3.0x/.gitkeep
 assets/lottie/*
 !assets/lottie/.gitkeep
 rules/*.ini

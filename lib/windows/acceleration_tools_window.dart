@@ -22,8 +22,8 @@ Future<void> mainAccelerationToolsWindow(List<String> args) async {
   final api = RustApi.instance;
   final windowId = args.length > 1 ? args[1] : '';
 
-  FlutterError.onError = (details) => unawaited(
-      api.logError('加速工具卡框架异常: ${details.exceptionAsString()}'));
+  FlutterError.onError = (details) =>
+      unawaited(api.logError('加速工具卡框架异常: ${details.exceptionAsString()}'));
 
   final controller = WindowController.fromWindowId(windowId);
 
@@ -34,7 +34,9 @@ Future<void> mainAccelerationToolsWindow(List<String> args) async {
     items = (m['tools'] as List)
         .cast<Map<Object?, Object?>>()
         .map((t) => AccelTool(
-            id: '${t['id']}', label: '${t['label']}', route: t['route'] as String?))
+            id: '${t['id']}',
+            label: '${t['label']}',
+            route: t['route'] as String?))
         .toList();
     final size = accelToolsLogicalSize(items.length);
     try {
@@ -66,9 +68,8 @@ Future<void> mainAccelerationToolsWindow(List<String> args) async {
       await Future.delayed(const Duration(milliseconds: 50));
     }
   }
-  await api.logInfo(ready
-      ? '加速工具卡 channel 已就绪'
-      : '加速工具卡 channel 注册超时（native 插件未注册）');
+  await api.logInfo(
+      ready ? '加速工具卡 channel 已就绪' : '加速工具卡 channel 注册超时（native 插件未注册）');
 
   runApp(_AccelToolsApp(controller: controller, items: () => items));
 }
@@ -80,7 +81,8 @@ const double kToolsTitleHeight = 28;
 const double kToolsRowHeight = 32;
 const double kToolsVerticalPadding = 6;
 
-Size accelToolsLogicalSize(int itemCount) => Size(kToolsWidth,
+Size accelToolsLogicalSize(int itemCount) => Size(
+    kToolsWidth,
     kToolsTitleHeight +
         kToolsRowHeight * (itemCount == 0 ? 1 : itemCount) +
         kToolsVerticalPadding * 2);
@@ -198,8 +200,8 @@ Future<void> _dispatch(
     if (main.isEmpty) {
       throw StateError('找不到主窗口引擎（${windows.length} 个子窗口）');
     }
-    await main.first
-        .invokeMethod<void>('tool_action', {'id': tool.id, 'route': tool.route});
+    await main.first.invokeMethod<void>(
+        'tool_action', {'id': tool.id, 'route': tool.route});
     await api.logInfo('加速工具动作 ${tool.id}');
   } catch (e) {
     await api.logError('加速工具动作失败 ${tool.id}: $e');

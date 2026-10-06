@@ -154,8 +154,8 @@ class _ManagerAppState extends State<ManagerApp> with WindowListener {
           if (route == null) {
             final trimmed =
                 await RustApi.instance.processesMemoryOptimization();
-            unawaited(RustApi.instance
-                .logInfo('加速工具一键加速：整理 $trimmed 个进程的内存占用'));
+            unawaited(
+                RustApi.instance.logInfo('加速工具一键加速：整理 $trimmed 个进程的内存占用'));
             return null;
           }
           await windowManager.show();

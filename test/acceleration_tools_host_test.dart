@@ -86,7 +86,8 @@ void main() {
           memoryRatio: 0.5,
           maxDiskRatio: 0.5);
     }
-    expect(errors.length, 3);
+    expect(errors.where((e) => e.startsWith('加速工具卡打开失败')).length, 3);
+    expect(errors.any((e) => e.contains('丢弃后重建')), isTrue);
     expect(shows, 0, reason: '没定位成功就不该把窗口亮出来');
     expect(host.isOpen, isFalse, reason: '三次失败后应丢弃，下次重建');
 

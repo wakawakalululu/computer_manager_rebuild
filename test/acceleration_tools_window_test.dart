@@ -16,8 +16,7 @@ void main() {
       home: SizedBox(
         width: size.width,
         height: size.height,
-        child: Material(
-            child: AccelToolsBody(tools: tools, onTool: onTool)),
+        child: Material(child: AccelToolsBody(tools: tools, onTool: onTool)),
       ),
     ));
   }

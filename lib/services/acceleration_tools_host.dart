@@ -39,14 +39,15 @@ class MultiWindowAccelTools implements AccelToolsWindow {
     Object? lastError;
     for (var attempt = 0; attempt < _maxAttempts; attempt++) {
       try {
-        final applied = await _controller
-            .invokeMethod<Map<Object?, Object?>>('set_slot', {
+        final applied =
+            await _controller.invokeMethod<Map<Object?, Object?>>('set_slot', {
           'x': ball.left,
           'y': ball.top,
           'width': ball.width,
           'height': ball.height,
           'tools': [
-            for (final t in tools) {'id': t.id, 'label': t.label, 'route': t.route}
+            for (final t in tools)
+              {'id': t.id, 'label': t.label, 'route': t.route}
           ],
         });
         return applied ?? const {};
@@ -91,8 +92,8 @@ class AccelToolsHost {
   bool get isOpen => _window != null;
 
   /// 卡片最多能占的高度（条目全开时）；宿主按条目数算，日志里好核对。
-  static Size cardSize(int itemCount) => Size(
-      190, 28 + 32 * (itemCount == 0 ? 1 : itemCount) + 6 * 2);
+  static Size cardSize(int itemCount) =>
+      Size(190, 28 + 32 * (itemCount == 0 ? 1 : itemCount) + 6 * 2);
 
   /// 按实测占用开卡。条目在这里算，宿主与测试共用同一份规则。
   Future<void> openFor({
@@ -100,8 +101,8 @@ class AccelToolsHost {
     required double memoryRatio,
     required double maxDiskRatio,
   }) async {
-    final tools = accelerationTools(
-        memoryRatio: memoryRatio, maxDiskRatio: maxDiskRatio);
+    final tools =
+        accelerationTools(memoryRatio: memoryRatio, maxDiskRatio: maxDiskRatio);
     _log('打开加速工具卡 内存=${(memoryRatio * 100).round()}% '
         '最满盘=${(maxDiskRatio * 100).round()}% 可执行项=${tools.length}');
     try {
