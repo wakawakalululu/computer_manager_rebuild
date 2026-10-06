@@ -4,6 +4,7 @@ import 'package:windows_single_instance/windows_single_instance.dart';
 
 import 'app.dart';
 import 'src/rust/frb_generated.dart';
+import 'windows/acceleration_tools_window.dart';
 import 'windows/floating_window.dart';
 import 'windows/tray_menu_window.dart';
 
@@ -25,6 +26,8 @@ Future<void> main(List<String> args) async {
         await mainFloatingWindow(args);
       case 'tray_menu':
         await mainTrayMenuWindow(args);
+      case 'acceleration_tools':
+        await mainAccelerationToolsWindow(args);
     }
     return;
   }

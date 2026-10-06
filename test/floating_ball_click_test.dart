@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:computer_manager/services/acceleration_tools.dart';
 import 'package:computer_manager/services/click_report.dart';
 import 'package:computer_manager/services/feedback_service.dart';
 import 'package:computer_manager/windows/floating_window.dart';
@@ -25,7 +24,7 @@ void main() {
   Future<void> pumpBall(WidgetTester tester,
       {required Future<int> Function() accelerate,
       required Future<void> Function() hide,
-      void Function(AccelTool)? onTool,
+      Future<void> Function(FloatingData)? openCard,
       FloatingData? data}) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -33,7 +32,7 @@ void main() {
             data: data ?? FloatingData.placeholder(),
             accelerate: accelerate,
             hide: hide,
-            onTool: onTool),
+            openCard: openCard),
       ),
     ));
   }
@@ -91,42 +90,24 @@ void main() {
     expect(accelerated, 0, reason: '右键只做关球');
   });
 
-  testWidgets('长按展开「加速工具」卡，只列真能执行的条目', (tester) async {
-    final opened = <AccelTool>[];
-    await pumpBall(tester,
-        accelerate: () async => 0, hide: () async {}, onTool: opened.add);
-    await tester.longPress(find.byType(FloatingWindowBody));
-    await tester.pump();
-
-    expect(find.text('加速工具'), findsOneWidget);
-    // 空闲状态：只有「一键加速」，不给「查看进程」「深度清理」占位
-    expect(find.text('一键加速'), findsOneWidget);
-    expect(find.text('查看进程'), findsNothing);
-    expect(find.text('深度清理'), findsNothing);
-
-    await tester.tap(find.text('一键加速'));
-    await tester.pump();
-    expect(opened.map((t) => t.id), ['accelerate']);
-  });
-
-  testWidgets('内存与磁盘都吃紧时，三条都在并可各自触发', (tester) async {
-    final opened = <AccelTool>[];
+  testWidgets('长按把开卡请求交给宿主，顺带带上当前占用数据', (tester) async {
+    FloatingData? handed;
+    var accelerated = 0;
     final data = FloatingData.placeholder()
       ..update(
           usedMemory: 930, totalMemory: 1000, cpuUsage: 30, maxDiskRatio: 0.96);
     await pumpBall(tester,
         data: data,
-        accelerate: () async => 0,
+        accelerate: () async => ++accelerated,
         hide: () async {},
-        onTool: opened.add);
+        openCard: (d) async => handed = d);
     await tester.longPress(find.byType(FloatingWindowBody));
     await tester.pump();
 
-    expect(find.text('查看进程'), findsOneWidget);
-    expect(find.text('深度清理'), findsOneWidget);
-
-    await tester.tap(find.text('深度清理'));
-    await tester.pump();
-    expect(opened.single.route, '/disk_clean_dashboard/deep_clean_scan');
+    // 球自己不再画列表（卡片是另一个子窗口），但要把算得动条目用的数据交出去
+    expect(find.text('加速工具'), findsNothing);
+    expect(handed, same(data));
+    expect(handed!.maxDisk.value, 0.96);
+    expect(accelerated, 0, reason: '长按只开卡，不重复触发加速');
   });
 }

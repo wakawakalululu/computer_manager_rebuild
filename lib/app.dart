@@ -14,6 +14,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'core/routes.dart';
 import 'core/theme.dart';
+import 'services/acceleration_tools_host.dart';
 import 'services/agent_process.dart';
 import 'services/click_report.dart';
 import 'services/floating_window_host.dart';
@@ -130,9 +131,33 @@ class _ManagerAppState extends State<ManagerApp> with WindowListener {
     try {
       final controller = await WindowController.fromCurrentEngine();
       await controller.setWindowMethodHandler((call) async {
-        // 球上展开卡的跳转条目：子引擎没有路由，主引擎唤回窗口并导航过去
-        if (call.method == 'open_route') {
-          final route = (call.arguments as Map)['route'] as String;
+        // 球上长按：把球的屏幕矩形 + 当前占用变成一张贴着球摆的「加速工具」卡
+        if (call.method == 'show_tools') {
+          final m = Map<Object?, Object?>.from(call.arguments as Map);
+          final used = int.tryParse('${m['usedMemory']}') ?? 0;
+          final total = int.tryParse('${m['totalMemory']}') ?? 0;
+          await AccelToolsHost.instance.openFor(
+            ball: Rect.fromLTWH(
+                (m['x'] as num).toDouble(),
+                (m['y'] as num).toDouble(),
+                (m['width'] as num).toDouble(),
+                (m['height'] as num).toDouble()),
+            memoryRatio: total == 0 ? 0 : used / total,
+            maxDiskRatio: (m['maxDiskRatio'] as num?)?.toDouble() ?? 0,
+          );
+          return null;
+        }
+        // 工具卡里选中一条：能就地做的就做，需要页面的就唤回主窗口再跳
+        if (call.method == 'tool_action') {
+          final m = Map<Object?, Object?>.from(call.arguments as Map);
+          final route = m['route'] as String?;
+          if (route == null) {
+            final trimmed =
+                await RustApi.instance.processesMemoryOptimization();
+            unawaited(RustApi.instance
+                .logInfo('加速工具一键加速：整理 $trimmed 个进程的内存占用'));
+            return null;
+          }
           await windowManager.show();
           await windowManager.focus();
           _appRouter?.push(route);

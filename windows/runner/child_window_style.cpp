@@ -36,6 +36,7 @@ constexpr int kDefaultDpi = 96;
 constexpr char kChannelName[] = "cm/window_native";
 constexpr char kFieldSep = '|';
 constexpr char kPlaceMethod[] = "place";
+constexpr char kRectMethod[] = "rect";
 constexpr size_t kPlaceFieldCount = 9;
 
 std::wstring Utf16(const std::string& utf8) {

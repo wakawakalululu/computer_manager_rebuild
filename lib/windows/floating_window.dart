@@ -5,9 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/theme.dart';
-import '../services/acceleration_tools.dart';
 import '../services/click_report.dart';
 import '../services/rust_api.dart';
+
+/// 与原生侧的文本协议通道（`place` / `rect`），见 child_window_style.cpp
+const _nativeChannel =
+    BasicMessageChannel<String>('cm/window_native', StringCodec());
 
 /// 悬浮窗子进程分支 —— 还原参考实现 desktop_multi_window 悬浮窗。
 ///
@@ -135,17 +138,21 @@ class FloatingData extends ChangeNotifier {
 /// `:255`「关闭悬浮球」说明球能自己关掉，这里挂在右键上。
 class FloatingWindowBody extends StatefulWidget {
   const FloatingWindowBody(
-      {super.key, required this.data, this.accelerate, this.hide, this.onTool});
+      {super.key,
+      required this.data,
+      this.accelerate,
+      this.hide,
+      this.openCard});
 
   final FloatingData data;
 
-  /// 加速与关球都可注入：子引擎里只有 desktop_multi_window 自己，
+  /// 加速、关球、开卡都可注入：子引擎里只有 desktop_multi_window 自己，
   /// 单测才能把「上报」「动作」两件事分开。
   final Future<int> Function()? accelerate;
   final Future<void> Function()? hide;
 
-  /// 展开卡里点了某一条（单测用它代替真窗口动作）
-  final void Function(AccelTool tool)? onTool;
+  /// 长按展开「加速工具」卡（卡片是另一个子窗口，球只报自己的矩形和占用）
+  final Future<void> Function(FloatingData data)? openCard;
 
   @override
   State<FloatingWindowBody> createState() => _FloatingWindowBodyState();
@@ -155,51 +162,6 @@ class _FloatingWindowBodyState extends State<FloatingWindowBody> {
   bool _busy = false;
   String? _flash;
   Timer? _flashTimer;
-
-  /// 展开态：球自己的「加速工具」卡。子窗口不能改尺寸（desktop_multi_window 的
-  /// WindowController 只有 show/hide），所以卡是画在球这 200x104 里的紧凑版。
-  bool _expanded = false;
-
-  Future<void> _runTool(AccelTool tool) async {
-    if (widget.onTool != null) return widget.onTool!(tool);
-    if (tool.route != null) {
-      await _openRouteInMainWindow(tool.route!);
-      return;
-    }
-    await _onTap();
-  }
-
-  /// 展开卡只列真能执行的条目（参考实现「隐藏不可操作项」的字面实现）
-  List<AccelTool> _tools(FloatingData data) => accelerationTools(
-        memoryRatio:
-            data.total.value == 0 ? 0 : data.used.value / data.total.value,
-        maxDiskRatio: data.maxDisk.value,
-      );
-
-  Widget _card(List<AccelTool> tools) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('加速工具',
-            style: TextStyle(color: Colors.white70, fontSize: 11)),
-        const SizedBox(height: 2),
-        if (tools.isEmpty)
-          const Text(accelToolsEmptyMessage,
-              style: TextStyle(color: Colors.white54, fontSize: 11))
-        else
-          for (final t in tools)
-            InkWell(
-              onTap: () => unawaited(_runTool(t)),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Text(t.label,
-                    style: const TextStyle(color: Colors.white, fontSize: 12)),
-              ),
-            ),
-      ],
-    );
-  }
 
   /// 点一次球后的提示，两秒后回到占用读数
   void _flashFor(String text) {
@@ -249,42 +211,38 @@ class _FloatingWindowBodyState extends State<FloatingWindowBody> {
           onTap: _onTap,
           // 展开用长按而不是双击：GestureDetector 一旦同时挂 onTap 与 onDoubleTap，
           // 每次单击都要先等 300ms 的双击判定窗口，主动作「点一下就释放内存」会变钝。
-          onLongPress: () => setState(() => _expanded = !_expanded),
+          onLongPress: () => unawaited(
+              (widget.openCard ?? _openToolsCardViaMainEngine)(widget.data)),
           onSecondaryTap: _onSecondaryTap,
           child: Container(
             color: _kPanelColor,
             padding: const EdgeInsets.all(10),
-            child: _expanded
-                ? _card(_tools(data))
-                : Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                        const Text('CPU / 内存',
-                            style:
-                                TextStyle(color: Colors.white70, fontSize: 11)),
-                        const SizedBox(height: 4),
-                        Text(
-                          data.total.value == 0
-                              ? '-- / --'
-                              : '${data.cpu.value.toStringAsFixed(0)}% / ${(ratio * 100).toStringAsFixed(0)}%',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700),
-                        ),
-                        Text(
-                          _flash ??
-                              (data.total.value == 0
-                                  ? '等待主窗口推送…'
-                                  : '${(data.used.value >> 30)}G / ${(data.total.value >> 30)}G'),
-                          style: TextStyle(
-                              color: _flash == null
-                                  ? Colors.white54
-                                  : Colors.white,
-                              fontSize: 10),
-                        ),
-                      ]),
+            child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('CPU / 内存',
+                      style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  const SizedBox(height: 4),
+                  Text(
+                    data.total.value == 0
+                        ? '-- / --'
+                        : '${data.cpu.value.toStringAsFixed(0)}% / ${(ratio * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    _flash ??
+                        (data.total.value == 0
+                            ? '等待主窗口推送…'
+                            : '${(data.used.value >> 30)}G / ${(data.total.value >> 30)}G'),
+                    style: TextStyle(
+                        color: _flash == null ? Colors.white54 : Colors.white,
+                        fontSize: 10),
+                  ),
+                ]),
           ),
         );
       },
@@ -300,19 +258,32 @@ void _warn(String message) {
   } catch (_) {}
 }
 
-/// 展开卡里的跳转条目：子引擎没有路由，只能把「去哪个页面」告诉主引擎，
-/// 由它唤回主窗口并导航过去。
-Future<void> _openRouteInMainWindow(String route) async {
+/// 长按：先问原生「我在屏幕哪个位置」，再把矩形和当前占用一起交给主引擎开卡。
+/// 子引擎里没有 screen_retriever / window_manager 的 registrar，球也可能被摆在
+/// 第二块高 DPI 屏上，这个矩形只有原生侧拿得准。
+Future<void> _openToolsCardViaMainEngine(FloatingData data) async {
   try {
+    final reply = await _nativeChannel.send('rect');
+    final f = (reply ?? '').split('|');
+    if (f.length < 5 || f[0] != 'rect') {
+      throw StateError('取悬浮球矩形失败: $reply');
+    }
     final windows = await WindowController.getAll();
     final main = windows.where((w) => w.arguments.isEmpty).toList();
     if (main.isEmpty) {
-      _warn('加速工具跳转 $route：找不到主窗口引擎（${windows.length} 个子窗口）');
-      return;
+      throw StateError('找不到主窗口引擎（${windows.length} 个子窗口）');
     }
-    await main.first.invokeMethod<void>('open_route', {'route': route});
+    await main.first.invokeMethod<void>('show_tools', {
+      'x': int.parse(f[1]),
+      'y': int.parse(f[2]),
+      'width': int.parse(f[3]),
+      'height': int.parse(f[4]),
+      'usedMemory': '${data.used.value}',
+      'totalMemory': '${data.total.value}',
+      'maxDiskRatio': data.maxDisk.value,
+    });
   } catch (e) {
-    _warn('加速工具跳转 $route 失败: $e');
+    _warn('打开加速工具卡失败: $e');
   }
 }
 
