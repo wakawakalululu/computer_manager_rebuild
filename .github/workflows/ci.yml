@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter-checks:
+    name: Flutter analyze + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.6
+          cache: true
+      - run: flutter analyze
+      - run: flutter test
+
+  rust-tests:
+    name: Rust cargo test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: cargo test
+        run: cargo test --manifest-path rust/Cargo.toml
+
+  codegen-drift:
+    name: frb codegen drift check
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.6
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frb codegen (pinned)
+        run: cargo install flutter_rust_bridge_codegen --version 2.9.0 --locked
+      - run: flutter pub get
+      - run: flutter_rust_bridge_codegen generate
+      - name: Fail if generated bindings are stale
+        shell: pwsh
+        run: |
+          git diff --exit-code -- rust/src/frb_generated.rs lib/src/rust
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::frb 绑定已过期：请运行 flutter_rust_bridge_codegen generate 并提交结果"
+            exit 1
+          }
+
+  build:
+    name: Build Windows (release)
+    runs-on: windows-latest
+    needs: [flutter-checks, rust-tests]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.6
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: flutter build windows
+        run: flutter build windows --release
+      - name: Bundle (GUI + Rust 三件套)
+        shell: pwsh
+        run: |
+          $rel = 'build/windows/x64/runner/Release'
+          Get-ChildItem $rel | Select-Object Name, Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pc-manager-windows-x64
+          path: build/windows/x64/runner/Release/
+          retention-days: 14
+          if-no-files-found: error

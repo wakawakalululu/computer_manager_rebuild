@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.6
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: flutter build windows
+        run: flutter build windows --release
+      - name: Zip bundle
+        shell: pwsh
+        run: |
+          $ver = '${{ github.ref_name }}'
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath "PCManager-$ver-windows-x64.zip"
+          Get-Item "PCManager-$ver-windows-x64.zip" | Select-Object Name, Length
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: PCManager-*-windows-x64.zip
+          generate_release_notes: true

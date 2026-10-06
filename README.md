@@ -3,6 +3,7 @@
 <img src="docs/assets/banner.svg" alt="PC Manager" width="720"/>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
+[![CI](https://github.com/wakawakalululu/computer_manager_rebuild/actions/workflows/ci.yml/badge.svg)](https://github.com/wakawakalululu/computer_manager_rebuild/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078d4.svg)](#)
 [![Flutter](https://img.shields.io/badge/Flutter-3.47-02569B.svg?logo=flutter)](https://flutter.dev)
 [![Rust](https://img.shields.io/badge/Rust-stable-DEA584.svg?logo=rust)](https://www.rust-lang.org)

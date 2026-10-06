@@ -205,12 +205,34 @@ std::string HandlePlaceRequest(HWND hwnd, const std::vector<std::string>& f) {
   return std::string(reply, static_cast<size_t>(written));
 }
 
+// 请求  rect      应答  rect|X|Y|宽|高（物理像素）
+//
+// 子引擎里没有 screen_retriever / window_manager 的 registrar，窗口自己的屏幕
+// 矩形只有原生知道。加速球的展开卡要贴着球摆，就得靠这条把矩形的真实位置
+// 交给主引擎（Dart 侧算不出：球可能被拖过、也可能在第二块高 DPI 屏上）。
+std::string HandleRectRequest(HWND hwnd) {
+  RECT r{};
+  if (!::GetWindowRect(hwnd, &r)) {
+    return "err|GetWindowRect 失败 winErr=" +
+           std::to_string(static_cast<unsigned long>(::GetLastError()));
+  }
+  char reply[96];
+  const int written = ::snprintf(reply, sizeof(reply), "rect|%d|%d|%d|%d",
+                                 static_cast<int>(r.left), static_cast<int>(r.top),
+                                 static_cast<int>(r.right - r.left),
+                                 static_cast<int>(r.bottom - r.top));
+  if (written <= 0) return "err|应答构造失败";
+  return std::string(reply, static_cast<size_t>(written));
+}
+
 std::string DispatchRequest(HWND hwnd, const std::string& request) {
   // 空字节不是文本协议的一部分，出现即说明 Dart 侧 codec 用错了
   if (request.find('\0') != std::string::npos) return "err|消息体含空字节";
   const auto fields = SplitFields(request, kPlaceFieldCount);
-  if (fields.size() < kPlaceFieldCount) return "err|字段不足";
+  if (fields.empty()) return "err|空请求";
+  if (fields[0] == kRectMethod) return HandleRectRequest(hwnd);
   if (fields[0] != kPlaceMethod) return "err|未知方法 " + fields[0];
+  if (fields.size() < kPlaceFieldCount) return "err|字段不足";
   return HandlePlaceRequest(hwnd, fields);
 }
 
