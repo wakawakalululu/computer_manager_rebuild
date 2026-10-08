@@ -95,7 +95,11 @@ class _FloatingApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       home: Scaffold(
-          backgroundColor: _kPanelColor, body: FloatingWindowBody(data: data)),
+          // 球外必须是透明的：参考实现的窗口只有那个圆，圆外能看见桌面。
+          // 原来这里铺 `_kPanelColor`（近黑），在矩形面板时代就是"一整块深色面板"，
+          // 换成圆球后如果留着，就成了圆后面一块挡事的黑方块。
+          backgroundColor: Colors.transparent,
+          body: FloatingWindowBody(data: data)),
     );
   }
 }
@@ -176,10 +180,18 @@ class _FloatingWindowBodyState extends State<FloatingWindowBody> {
     if (_busy) return; // 释放过程中不叠第二次
     reportClick('click_ball');
     setState(() => _busy = true);
+    // 「加速中」(`:495`)：按住不放时球上写这句，别让用户以为点了没反应
+    _flashFor('加速中');
+    final sw = Stopwatch()..start();
     try {
-      await (widget.accelerate ??
+      final trimmed = await (widget.accelerate ??
           RustApi.instance.processesMemoryOptimization)();
-      _flashFor('加速完成');
+      sw.stop();
+      // 只说「加速完成」等于报了一件不知道成没成的事——修剪了几个进程是唯一的证据。
+      // 「加速球耗时」`:127` 是自带的说法。⚠ 球很小（那行字 fontSize 只有 10），
+      // 所以这里只能摆得下"个数 + 毫秒"，完整句子给不起——写长了会溢出/换行。
+      final freed = trimmed > 0 ? '$trimmed 进程 · ' : '';
+      _flashFor('$freed耗时 ${sw.elapsedMilliseconds}ms');
     } catch (e) {
       _warn('悬浮球加速失败: $e');
       _flashFor('内存优化错误！');
@@ -207,42 +219,139 @@ class _FloatingWindowBodyState extends State<FloatingWindowBody> {
         final ratio =
             data.total.value == 0 ? 0.0 : data.used.value / data.total.value;
         return GestureDetector(
-          behavior: HitTestBehavior.opaque,
+          // deferToChild 而不是 opaque：球窗口的矩形比圆大（原生默认尺寸改到 86 之前
+          // 更是明显），opaque 会让圆**外面那块透明区域也吃点击**——用户看到的是一个球，
+          // 点到的却是一片看不见的方框。
+          behavior: HitTestBehavior.deferToChild,
           onTap: _onTap,
           // 展开用长按而不是双击：GestureDetector 一旦同时挂 onTap 与 onDoubleTap，
           // 每次单击都要先等 300ms 的双击判定窗口，主动作「点一下就释放内存」会变钝。
           onLongPress: () => unawaited(
               (widget.openCard ?? _openToolsCardViaMainEngine)(widget.data)),
           onSecondaryTap: _onSecondaryTap,
-          child: Container(
-            color: _kPanelColor,
-            padding: const EdgeInsets.all(10),
-            child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
+          // 圆形水波球：形状与尺寸按 2026-10-08 对参考实现的实机取证
+          // （PrintWindow 直取正在跑的参考实现：`CLASS=FlutterMultiWindow`、
+          //  `TITLE=accelerationBall`、**86x86 逻辑像素**，画面是圆 + 从底部填上来的"水"，
+          //  读数只有大号数字 + 小号 %，没有 GB、没有 CPU、没有标题行）。
+          // ⚠ `windows/runner/child_window_style.cpp` 里原来写着"还原参考实现…窄长条"，
+          //   那句注释是**错的**（本次取证推翻它），别再照它把球改回矩形。
+          // ⚠ 水位与内存使用率的对应关系**仍未定死**：两次采样都是 51%、水面都在正中，
+          //   分不清"水位=ratio"与"水位是固定装饰"。这里按 ratio 实现，取到不同占用的
+          //   第二张图后要回来复核（任务单 #106）。
+          child: Center(
+            child: SizedBox(
+              width: 86,
+              height: 86,
+              child: Stack(
+                alignment: Alignment.center,
                 children: [
-                  const Text('CPU / 内存',
-                      style: TextStyle(color: Colors.white70, fontSize: 11)),
-                  const SizedBox(height: 4),
-                  Text(
-                    data.total.value == 0
-                        ? '-- / --'
-                        : '${data.cpu.value.toStringAsFixed(0)}% / ${(ratio * 100).toStringAsFixed(0)}%',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                        shape: BoxShape.circle, color: Color(0xFFF2F7FD)),
+                    child: SizedBox(width: 86, height: 86),
                   ),
-                  Text(
-                    _flash ??
-                        (data.total.value == 0
-                            ? '等待主窗口推送…'
-                            : '${(data.used.value >> 30)}G / ${(data.total.value >> 30)}G'),
-                    style: TextStyle(
-                        color: _flash == null ? Colors.white54 : Colors.white,
-                        fontSize: 10),
+                  // 水：从底部填到 ratio 高度，再按椭圆裁掉圆外的角。
+                  // 三处装饰按参考实现的取证图补：① 水面下一道浅色高光带（水与空气的分界），
+                  // ② 越往下越深（参考实现底部有一条更深的蓝带），③ 蓝环内侧留一道浅间隙
+                  //   （参考实现是"亮蓝环 + 环内一圈白"，不是蓝环直接贴内容）。
+                  // ⚠ 只加装饰，**不改那层贴底水的高度算法**——几何用例钉的就是它。
+                  ClipOval(
+                    child: SizedBox(
+                      width: 86,
+                      height: 86,
+                      child: Stack(children: [
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          height: data.total.value == 0
+                              ? 0
+                              : 86 * ratio.clamp(0.0, 1.0),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [
+                                  const Color(0xFFA9D3F2),
+                                  const Color(0xFFCBE6F9),
+                                ],
+                              ),
+                              border: Border(
+                                top: BorderSide(
+                                    color: const Color(0xFFEAF6FF), width: 2),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
                   ),
-                ]),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: const Color(0xFF3FA9F5), width: 2),
+                    ),
+                    child: const SizedBox(width: 86, height: 86),
+                  ),
+                  // 环内的浅间隙： inset 一点再描一圈近白的细边
+                  Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: const Color(0xC8FFFFFF), width: 1.5),
+                      ),
+                      child: const SizedBox(width: 80, height: 80),
+                    ),
+                  ),
+                  // 读数。三种状态各说各的话：
+                  //  - 刚点完：只说自带的短句（成功「加速完成」`:278`、失败「内存优化错误！」
+                  //    `:305`）。圆球装不下"释放 N 个进程 · 耗时 Xms"那种长句，
+                  //    而参考实现的球上本来就只有百分比；"点了一下有没有反应"由
+                  //    这两句自带的话负责（#78 那条判据问的是**界面上有没有可见变化**）。
+                  //  - 还没收到数据：给 `--`，**不摆一个 0%**（那比空白更像结论）。
+                  //  - 正常：大号数字 + 小号 %。
+                  if (_flash != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Text(
+                        _flash!,
+                        textAlign: TextAlign.center,
+                        // 10 号字是**跟着现成的提示语长度定的**：'3 进程 · 耗时 120ms'
+                        // 这种串在 86 逻辑像素的圆里要两行才放得下（#44 定的判据是
+                        // "个数 + 毫秒"要看得见，完整句子给不起）。
+                        style: const TextStyle(
+                            fontSize: 10,
+                            height: 1.2,
+                            color: Color(0xFF333333)),
+                      ),
+                    )
+                  else if (data.total.value == 0)
+                    const Text('--',
+                        style: TextStyle(
+                            fontSize: 20, color: Color(0xFF666666)))
+                  else
+                    Text.rich(
+                      TextSpan(children: [
+                        TextSpan(
+                            text: (ratio * 100).round().toString(),
+                            style: const TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF333333))),
+                        const TextSpan(
+                            text: '%',
+                            style: TextStyle(
+                                fontSize: 12, color: Color(0xFF555555))),
+                      ]),
+                      textAlign: TextAlign.center,
+                    ),
+                ],
+              ),
+            ),
           ),
         );
       },
@@ -250,12 +359,13 @@ class _FloatingWindowBodyState extends State<FloatingWindowBody> {
   }
 }
 
-/// 留痕不能反过来打断球：子引擎里桥可能还没就绪（或单测里根本没有桥），
-/// 记不上日志就把异常抛回用户点击的动作上，是本末倒置。
+/// 留痕不能反过来打断球：子引擎里桥可能还没就绪（或单测里根本没有桥）。
+///
+/// `RustApi.logWarn` **本身已保证不抛**，所以这里不需要（也不该）再套一层
+/// `try/catch` —— 同一保证有两套实现时，改一处忘了另一处就是下一轮 bug。
+/// 保留这个函数是因为调用点多，顺带让意图（"这条绝不能打断点击"）显式。
 void _warn(String message) {
-  try {
-    unawaited(RustApi.instance.logWarn(message));
-  } catch (_) {}
+  unawaited(RustApi.instance.logWarn(message));
 }
 
 /// 长按：先问原生「我在屏幕哪个位置」，再把矩形和当前占用一起交给主引擎开卡。

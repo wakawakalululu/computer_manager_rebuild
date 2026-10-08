@@ -32,7 +32,9 @@ class ResidentStatus {
     required this.guardedBy,
   });
 
-  /// sc query 解析出的服务状态；'UNKNOWN' 表示未安装或无权限查询
+  /// sc query 解析出的服务状态。
+  /// 'UNKNOWN' = 查了但说不上来；'NOT_INSTALLED' = Windows 明确回了 1060。
+  /// 两者都表示"没在跑"，但**只有后者能据此说"还没装"**。
   final String serviceState;
   final bool agentAlive;
 
@@ -42,7 +44,10 @@ class ResidentStatus {
   bool get serviceRunning => serviceState == 'RUNNING';
 
   String get serviceStateText {
-    if (serviceState == 'UNKNOWN') return '未安装/不可查询';
+    // "没装" 与 "查不到" 是两件事：Windows 明确回了 1060 才叫没装。
+    // 原来两者都摆成「未安装/不可查询」，等于永远不敢说"还没装"。
+    if (serviceState == 'NOT_INSTALLED') return '未安装';
+    if (serviceState == 'UNKNOWN') return '状态不可查询';
     if (serviceState == 'RUNNING') return '运行中';
     if (serviceState == 'STOPPED') return '已停止';
     return serviceState;
@@ -85,10 +90,19 @@ class ResidentAgentGuard {
 
   Future<void> start() async {
     if (_timer != null) return;
-    await RustApi.instance
-        .logInfo('会话内守护启动：每 ${_interval.inSeconds}s 巡检 $kAgentExeName');
-    _timer = Timer.periodic(_interval, (_) => _tick());
-    await _tick();
+    // 巡检是这条链路的**全部**：timer 起不来就等于"无人守护"，而调用方是
+    // `unawaited(ResidentAgentGuard.instance.start())`——抛出去没人接，
+    // 界面上照样显示"守护已启动"。所以在这里兜住，别让一次失败断掉整条链路。
+    try {
+      await RustApi.instance
+          .logInfo('会话内守护启动：每 ${_interval.inSeconds}s 巡检 $kAgentExeName');
+      _timer = Timer.periodic(_interval, (_) => _tick());
+      await _tick();
+    } catch (e) {
+      await RustApi.instance.logError('会话内守护启动失败（采集守护将不可用）: $e');
+      // 定时器已经起了就留着：下一轮可能就成功了，犯不着一失败就整个停掉
+      if (_timer == null) stop();
+    }
   }
 
   /// 只停掉本 GUI 的巡检；已拉起的 agent 继续常驻（见类注释）

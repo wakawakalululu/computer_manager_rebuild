@@ -6,6 +6,7 @@ import 'package:lottie/lottie.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../core/theme.dart';
+import '../services/running_tasks.dart';
 import '../services/rust_api.dart';
 
 /// 自定义标题栏（参考实现使用 window_manager 无边框窗口）
@@ -40,8 +41,10 @@ class TitleBar extends StatelessWidget {
             icon: Icons.close,
             danger: true,
             onTap: () async {
-              // 参考实现行为：关闭 → 隐藏到托盘常驻
-              await windowManager.hide();
+              // 走真正的关闭请求（main.dart 里 setPreventClose(true)），由
+              // `ManagerApp.onWindowClose` 弹「是否要关闭窗口」问一句去向；
+              // 这里直接 hide() 会把那一步绕过去。
+              await windowManager.close();
             },
           ),
         ],
@@ -89,12 +92,21 @@ class PageHeader extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           if (onBack != null)
-            InkWell(
-              onTap: onBack,
-              child: const Padding(
-                padding: EdgeInsets.only(right: 10),
-                child:
-                    Icon(Icons.arrow_back_ios, size: 16, color: Colors.white),
+            // 返回箭头压在渐变头上：默认 InkWell 的水波纹是深色，在这张深色
+            // 渐变上看不见，等于点下去毫无反馈。改成半透明圆形涟漪。
+            Material(
+              color: Colors.transparent,
+              shape: const CircleBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: onBack,
+                child: const Padding(
+                  padding:
+                      EdgeInsets.only(right: 10, left: 6, top: 6, bottom: 6),
+                  child:
+                      Icon(Icons.arrow_back_ios, size: 16, color: Colors.white),
+                ),
               ),
             ),
           Text(title,
@@ -173,6 +185,13 @@ class EntryCard extends StatelessWidget {
 /// id 与 title 同源（「KB5066130  KB5066130」）。extra 为空时也不留尾随空格。
 /// 列表行用默认的双空格拉开名称与版本号；写进整句文案里要传 sep: ' '，
 /// 不然「确定卸载 Ditto  3.24」那一段看着像手抖打重了。
+/// 逐条操作失败时的提示：必须点名是哪一条。
+///
+/// 一屏几十个应用/补丁/启动项，只说「卸载失败」用户根本不知道是哪一行出了问题，
+/// 而同一处的成功提示是带名字的（「卸载补丁 KB…」）——失败那行更该带。
+String perItemFailure(String action, String item, Object err) =>
+    '$action $item 失败：${bridgeErrorText(err)}';
+
 String dedupTitle(String primary, String extra, {String sep = '  '}) {
   final e = extra.trim();
   if (e.isEmpty || primary.contains(e)) return primary;
@@ -188,6 +207,19 @@ String? rebootNotice(List<String> reasons) {
     return '存在需要重启云电脑才生效的补丁';
   }
   return '有文件操作需要重启后才能完成';
+}
+
+/// 开机耗时是**秒级**的量（本机实测 32.016 秒），不能复用 [formatDuration]：
+/// 那个函数是为运行时长（小时/天）写的，最短一档是「不足 1 分钟」，
+/// 会把 32 秒显示成「不足 1 分钟」——恰好丢掉这一行存在的全部意义。
+String formatBootDuration(int millis) {
+  if (millis < 0) millis = 0;
+  if (millis < 1000) return '$millis 毫秒';
+  final s = millis / 1000.0;
+  if (s < 60) return '${s.toStringAsFixed(1)} 秒';
+  final m = s ~/ 60;
+  final rem = (s % 60).round();
+  return rem == 0 ? '$m 分钟' : '$m 分 $rem 秒';
 }
 
 /// 运行时长（毫秒）→ 中文短时长。启动项页直接把这个数除以 1000 显示成
@@ -236,7 +268,7 @@ Future<bool> confirmDestructive(BuildContext context,
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('取消')),
         FilledButton(
-            onPressed: () => Navigator.pop(ctx, true), child: const Text('确认')),
+            onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
       ],
     ),
   );
@@ -300,6 +332,95 @@ class ThresholdPopupCard extends StatelessWidget {
                   TextButton(onPressed: onCancel, child: const Text('取消')),
                   TextButton(onPressed: onNever, child: const Text('不再提示')),
                   FilledButton(onPressed: onAction, child: Text(actionLabel)),
+                ]),
+              ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// 点标题栏关闭按钮时的去向确认。
+///
+/// 参考实现的文案表里有「是否要关闭窗口」(:200)、「是否最小化」(:546)，以及成对的
+/// 「最小化」(:467) / 「关闭」(:14)——合起来就是"关窗口时问一句：收进托盘还是真退"。
+/// 我们原来是无声地藏进托盘（等于替用户做了决定）。四个动作标签全部用自带原文；
+/// 「是否最小化」放在正文位是因为它正好是这两个按钮要回答的问题，不另外编一句话。
+/// 「不再提示」与阈值弹窗同一档语义：以后直接按默认动作（收进托盘）走，不再问。
+/// 什么都不通知的空 Listenable：没任务在跑时不必订阅 `RunningTasks`。
+class _NeverListenable extends ChangeNotifier {}
+
+class CloseWindowCard extends StatelessWidget {
+  const CloseWindowCard({
+    super.key,
+    required this.onMinimize,
+    required this.onClose,
+    required this.onCancel,
+    required this.onNever,
+    this.notice,
+    this.liveRunningTask = false,
+  });
+  final VoidCallback onMinimize;
+  final VoidCallback onClose;
+  final VoidCallback onCancel;
+  final VoidCallback onNever;
+
+  /// 有长任务在跑时多一行提醒（「关闭窗口将会取消正在进行中的任务。」:89）。
+  /// 没任务时不给这一行——那句"会取消任务"在当时就是假话。
+  ///
+  /// [notice] 是**打开弹窗那一刻**的快照，弹窗开着的时候任务跑完了，它就变成
+  /// 假话了（用户在"最小化"和"关闭"之间犹豫时正好会碰上）。所以真路径走
+  /// [liveRunningTask]，每次 build 重新问一次登记表；[notice] 只留给不想引
+  /// 依赖的调用方/测试。
+  final String? notice;
+
+  /// 真路径用：提醒按 [RunningTasks] **当前**状态实时算，而不是打开弹窗那一刻
+  /// 的快照。设为 true 即表示"去问登记表"，任务起落会自动改口。
+  final bool liveRunningTask;
+
+  @override
+  Widget build(BuildContext context) {
+    // 两个入口二选一：liveRunningTask 去问登记表，notice 是静态快照
+    final listen = liveRunningTask ? RunningTasks.instance : null;
+    if (listen == null) return _card(notice != null);
+    // 任务起落时重建，弹窗开着也能改口（否则那句"会取消任务"会变成假话）
+    return ListenableBuilder(
+      listenable: listen,
+      builder: (context, _) => _card(RunningTasks.instance.anyRunning),
+    );
+  }
+
+  Widget _card(bool showNotice) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      backgroundColor: AppTheme.cardBg,
+      child: SizedBox(
+        key: const ValueKey('close-window-card'),
+        width: 420,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('是否要关闭窗口',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
+                const Text('是否最小化',
+                    style: TextStyle(color: AppTheme.textSub, fontSize: 13)),
+                if (showNotice) ...[
+                  const SizedBox(height: 6),
+                  Text(notice ?? kRunningTaskCloseNotice,
+                      style:
+                          const TextStyle(color: AppTheme.warn, fontSize: 13)),
+                ],
+                const SizedBox(height: 18),
+                Row(children: [
+                  TextButton(onPressed: onCancel, child: const Text('取消')),
+                  TextButton(onPressed: onNever, child: const Text('不再提示')),
+                  const Spacer(),
+                  TextButton(onPressed: onClose, child: const Text('关闭')),
+                  FilledButton(onPressed: onMinimize, child: const Text('最小化')),
                 ]),
               ]),
         ),

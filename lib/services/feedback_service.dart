@@ -252,7 +252,14 @@ class FeedbackSubmitter {
     String? zipPath;
     try {
       onStage?.call(FeedbackStage.collecting);
-      zipPath = await collectLog();
+      // 附件是**可选**的：打包日志失败不该让用户写好的问题描述一起丢掉。
+      // 原来 collectLog 抛出去会一路冒到最外层 catch → 整次提交失败，
+      // 用户看到的是"提交失败"，而真实情况只是"没带日志"。降级成"没附件"并记一条。
+      try {
+        zipPath = await collectLog();
+      } catch (e) {
+        await error('收集日志包失败，本次反馈将不带附件: $e');
+      }
       final target = await resolveTarget();
       final client = openClient(target);
       try {

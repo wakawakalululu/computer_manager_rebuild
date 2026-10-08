@@ -44,7 +44,22 @@ class _ExaminationPageState extends State<ExaminationPage> {
         .listen((_) => _refresh());
   }
 
+  /// 轮询每 2s 一次。四次读取里**任何一次抛异常，整轮都会中断**——
+  /// 而抛出去的地方是 `Stream.periodic(...).listen(...)`，那个 Future 没人接，
+  /// 于是这一轮的数字再也不更新：面板**看起来还是"活的"（曲线停在旧值）**，
+  /// 实际已经死了，下一轮也起不来。
+  ///
+  /// 所以整轮包一层 catch：失败就保留上一轮的读数（那是真实测过的值，比清空可信），
+  /// 记一条日志，下一轮 2s 后自然会重试。
   Future<void> _refresh() async {
+    try {
+      await _refreshOnce();
+    } catch (e) {
+      unawaited(RustApi.instance.logError('刷新首页数据失败（保留上一轮读数）: $e'));
+    }
+  }
+
+  Future<void> _refreshOnce() async {
     final api = RustApi.instance;
     final cpu = await api.readCupInfo();
     final mem = await api.readMemory2();
@@ -65,7 +80,8 @@ class _ExaminationPageState extends State<ExaminationPage> {
   }
 
   /// 阈值告警 —— 占用超过 90% 时触发参考实现同款弹窗。
-  /// 轮询每 2s 调一次，防重复由 ThresholdPopups.seen 集合 + 本地“不再提示”承担。
+  /// 轮询每 2s 调一次，防重复由 claimReminder（本轮只弹一次）+ 「设置—高负载提示」
+  /// 里的开关承担。
   /// 三个弹窗的键名（RAM_window / CPU_window / SystemDisk_window）与参考实现的点击
   /// 事件名同源，主动作 id 也照事件表里的英文标识写（expedite / ProcessManagement /
   /// deepclean），埋点才能对上。
@@ -86,11 +102,22 @@ class _ExaminationPageState extends State<ExaminationPage> {
     if (mem.ratio > 0.9) {
       unawaited(ThresholdPopups.maybeShow(
         key: 'RAM_window',
-        title: '内存占用过高',
-        body: '检测到内存占用过高，可一键关闭后台进程释放资源。',
+        // 标题取参考实现自带的「内存高负载提示」（zh_strings.txt:262）
+        title: '内存高负载提示',
+        // 两句都取参考实现自带的串（zh_strings.txt:579、:182），与 CPU 那条同一句式
+        body: '您的电脑内存使用率已达 ${(mem.ratio * 100).round()}%，'
+            '建议您释放内存，或关闭内存占用率高的应用',
+        // ⚠「立即加速」是我们自己的说法（表里只有「一键加速」`:439`、「完成加速」`:60`，
+        // 那两个已用在真正该用的地方：加速工具条目与加速完成提示）。
         actionLabel: '立即加速',
         actionId: 'expedite',
-        action: () => RustApi.instance.processesMemoryOptimization(),
+        // 修剪了几个进程是这件事唯一的证据；原来返回值直接丢掉（也不接异常），
+        // 用户点了既不知道释放了多少，失败也一声不吭。
+        report: () async {
+          final trimmed = await RustApi.instance.processesMemoryOptimization();
+          // trimmed = 0 不是失败（本来就没多少可释放的），但也**不**报"释放了 0 个"糊弄
+          return trimmed > 0 ? '完成加速：释放 $trimmed 个进程' : '完成加速';
+        },
         route: '/app_manage_dashboard/process_info',
       ));
     }
@@ -98,7 +125,7 @@ class _ExaminationPageState extends State<ExaminationPage> {
       if (d.ratio > 0.9) {
         unawaited(ThresholdPopups.maybeShow(
           key: 'SystemDisk_window',
-          title: '系统盘空间不足',
+          title: '系统盘空间不足提示',
           // 前半句取参考实现自带的「您的电脑系统盘使用率已达」（zh_strings.txt:510）
           body: '您的电脑系统盘使用率已达 ${(d.ratio * 100).round()}%，建议深度清理。',
           actionLabel: '深度清理',
@@ -111,15 +138,11 @@ class _ExaminationPageState extends State<ExaminationPage> {
     }
   }
 
-  int get _score {
-    var s = 100;
-    if (_cpu != null) s -= (_cpu!.usage / 4).round();
-    if (_mem != null) s -= (_mem!.ratio * 20).round();
-    for (final d in _disks) {
-      s -= (d.ratio * 10).round();
-    }
-    return s.clamp(5, 100);
-  }
+  int get _score => healthScore(
+        cpuUsage: _cpu?.usage,
+        memRatio: _mem?.ratio,
+        diskRatios: [for (final d in _disks) d.ratio],
+      );
 
   /// 立即体检：在首页这一页就地跑一轮（参考实现的检查内容就在首页路由上）。
   /// 每次点都把面板换一个新 key，重跑一遍；跑完的结果留在页上。
@@ -156,7 +179,8 @@ class _ExaminationPageState extends State<ExaminationPage> {
             child: UsageBar(
               label: '磁盘 ${d.letter}',
               ratio: d.ratio,
-              detail: '${(d.free >> 30)}G 可用 / ${(d.total >> 30)}G',
+              // 与清理页头卡同一套容量格式化：`>> 30` 会把不足 1G 的盘写成 0G
+              detail: diskCapacityDetail(d),
             ),
           ),
         if (_net != null)
@@ -188,6 +212,39 @@ class _ExaminationPageState extends State<ExaminationPage> {
       ]),
     );
   }
+}
+
+/// 首页那张卡上的数字。
+///
+/// ⚠ **「设备健康评分」这个说法和它的算法都是我们自己的**，不是照抄参考实现：
+/// 它的材料里**完全没有"评分/健康"这个概念**——`zh_strings.txt` 搜「评分」零命中、
+/// 「健康」只出现在法律条款里，`classes.txt`/`click_events.txt`/`frb_calls.txt`
+/// 搜 score/health/rating 也全为空。它首页那条线索是「上次体检时间」`:282`
+/// 与「全面体检」（体检面板标题，我们已经在用）。所以这个数字是**我们加的一个概览指标**，
+/// 不是它的功能复刻。留着的代价要如实写在这里：它把三个占用率折算成一个
+/// 没有出处的分数，而界面上它长得像一句实测结论。
+///
+/// 权重（CPU/4、内存×20、最紧的一张盘×10）同样是我们的取值，
+/// 刻意让"读不到"的那几项**不参与扣分**：把没读到当成 0 占用，等于
+/// 凭空缺给 100 分里的一大块——那正是本项目一路在清的那类缺陷。
+///
+/// ⚠ 磁盘只取**最紧的那一张**，不是逐张累加。原先写的是 `for (d in disks) s -= d.ratio*10`，
+/// 于是一台插了 4 张盘的机器光磁盘就能扣 40 分，而**配置完全相同的单盘机只扣 10 分**——
+/// 分数取决于系统报了几张卷，而不是机器状态。那种差异不是"健康"，是计数副作用。
+int healthScore({
+  double? cpuUsage,
+  double? memRatio,
+  List<double> diskRatios = const [],
+}) {
+  var s = 100.0;
+  if (cpuUsage != null) s -= cpuUsage / 4.0;
+  if (memRatio != null) s -= memRatio * 20.0;
+  var worst = 0.0;
+  for (final r in diskRatios) {
+    if (r > worst) worst = r;
+  }
+  s -= worst * 10.0;
+  return s.round().clamp(5, 100);
 }
 
 class _ScoreCard extends StatelessWidget {
@@ -223,6 +280,8 @@ class _ScoreCard extends StatelessWidget {
         const Expanded(
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // ⚠「设备健康评分」这句话是我们自己的说法，参考实现的文案表里搜不到；
+            // 整个"评分"概念它都没有（详见 [healthScore] 上方那段）。
             Text('设备健康评分',
                 style: TextStyle(
                     color: Colors.white,
@@ -237,6 +296,9 @@ class _ScoreCard extends StatelessWidget {
           style: FilledButton.styleFrom(
               backgroundColor: Colors.white, foregroundColor: AppTheme.primary),
           onPressed: onExamine,
+          // ⚠「立即体检」是我们自己的说法，表里搜不到这个词。它只沿用了参考实现
+          // 「立即X」的构词（「立即安装」`:189`、「立即更新」`:489`）；按钮的动作是真接通的
+          // （就地跑一轮体检，见 _examine），不是画个假按钮。
           child: const Text('立即体检'),
         ),
       ]),

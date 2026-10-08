@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -29,8 +31,15 @@ class _ManagerShellState extends State<ManagerShell> {
   void initState() {
     super.initState();
     Stream.periodic(const Duration(seconds: 2)).listen((_) async {
-      final mem = await RustApi.instance.readMemory2();
-      if (mounted) setState(() => _memPct = (mem.ratio * 100).round());
+      // 与首页同一个坑：`listen` 返回的 Future **没人接**，一次 readMemory2 抛异常
+      // 就让这个轮询**永久停摆**——而导航栏上的内存百分比会**停在最后一个正常值**，
+      // 看上去完全像在实时更新。失败就保留旧值，下一轮 2s 后自然重试。
+      try {
+        final mem = await RustApi.instance.readMemory2();
+        if (mounted) setState(() => _memPct = (mem.ratio * 100).round());
+      } catch (e) {
+        unawaited(RustApi.instance.logError('刷新导航栏内存占用失败（保留上一次读数）: $e'));
+      }
     });
   }
 
@@ -166,6 +175,9 @@ GoRouter buildRouter() => GoRouter(
                   GoRoute(
                       path: 'patch_test',
                       builder: (_, __) => const PatchTestPage()),
+                  GoRoute(
+                      path: 'security_disk',
+                      builder: (_, __) => const SecurityDiskPage()),
                 ],
               ),
             ]),

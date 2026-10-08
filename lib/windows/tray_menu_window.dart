@@ -112,8 +112,18 @@ Map<Object?, Object?> _parsePlaced(String reply) {
 
 /// 菜单条目。动作都由子引擎回传给主引擎执行 —— 子窗口里没有窗口插件可用，
 /// 唤回主界面/退出进程只能由主窗口那边做。
+///
+/// 条目集与标签按参考实现的证据来：它有 `_TrayMenuComponentState`（托盘菜单组件），
+/// 文案表里有一组短促的命令式标签「打开」(:244) / 「设置」(:273) / 「隐藏窗口」(:258) /
+/// 「关闭悬浮球」(:255)，配合日志「判断按钮打开对应路径」(:423) 与
+/// 「加速球隐藏消息发送成功！」(:106)，说明它的托盘菜单不止两项。
+/// 「退出」这条没在文案表里找到裸串（只有「开始退出应用」:62 这类日志），
+/// 但总得留一条真退出的路，所以这一条仍用我们自己的说法。
 enum TrayMenuAction {
-  showMain('showMain', '显示主界面'),
+  open('open', '打开'),
+  settings('settings', '设置'),
+  hideWindow('hideWindow', '隐藏窗口'),
+  closeBall('closeBall', '关闭悬浮球'),
   quit('quit', '退出');
 
   const TrayMenuAction(this.id, this.label);

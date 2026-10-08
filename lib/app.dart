@@ -18,6 +18,7 @@ import 'services/acceleration_tools_host.dart';
 import 'services/agent_process.dart';
 import 'services/click_report.dart';
 import 'services/floating_window_host.dart';
+import 'services/reminders.dart';
 import 'services/rust_api.dart';
 import 'services/tray_menu_host.dart';
 import 'widgets/common.dart';
@@ -25,6 +26,9 @@ import 'widgets/common.dart';
 /// SmartDialog 弹窗的构建上下文位于 Router 子树之外，拿不到 GoRouter 的
 /// InheritedWidget —— 用全局引用兜底导航，由 [_ManagerAppState] 生命周期维护。
 GoRouter? _appRouter;
+
+/// 「不再提示」记下以后，点关闭按钮不再问去向，直接收进托盘。
+const String kNeverAskCloseWindow = 'never_closeWindow';
 
 class ManagerApp extends StatefulWidget {
   const ManagerApp({super.key});
@@ -172,9 +176,20 @@ class _ManagerAppState extends State<ManagerApp> with WindowListener {
         if (call.method != 'tray_action') return null;
         final action = (call.arguments as Map)['action'];
         switch (action) {
-          case 'showMain':
+          case 'open':
             await windowManager.show();
             await windowManager.focus();
+          case 'settings':
+            // 「设置」这条要先唤回主窗再跳过去：菜单是从托盘点的，
+            // 窗口可能正藏在托盘里，只导航不显示等于没反应。
+            await windowManager.show();
+            await windowManager.focus();
+            _appRouter?.go('/app_setting_route');
+          case 'hideWindow':
+            await windowManager.hide();
+          case 'closeBall':
+            await FloatingWindowHost.instance.close();
+            unawaited(RustApi.instance.logInfo('悬浮球已由托盘菜单关闭'));
           case 'quit':
             await windowManager.destroy();
           default:
@@ -193,8 +208,42 @@ class _ManagerAppState extends State<ManagerApp> with WindowListener {
 
   @override
   void onWindowClose() {
-    // 关窗即入托盘，与参考实现一致
-    unawaited(windowManager.hide());
+    unawaited(_handleCloseRequest());
+  }
+
+  /// 点关闭按钮先问一句去向（参考实现自带「是否要关闭窗口」/「是否最小化」与成对的
+  /// 「最小化」「关闭」）。原来是无条件藏进托盘，等于替用户做了决定。
+  /// 选过「不再提示」以后按默认动作直接收进托盘——托盘和常驻采集都还在，不会失联。
+  Future<void> _handleCloseRequest() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(kNeverAskCloseWindow) ?? false) {
+      await windowManager.hide();
+      return;
+    }
+    unawaited(SmartDialog.show(
+      // 这个确认没有"点空白处算了"的语义：四个去向都得自己选，
+      // 遮罩可点会让上面那条 await 的分支变成悬空的。
+      clickMaskDismiss: false,
+      builder: (_) => CloseWindowCard(
+        // 传"此刻有没有任务在跑"，而不是传那句话的快照：弹窗开着的时候
+        // 扫描跑完了，提醒要跟着收回去，不能让用户对着一句假话点关闭。
+        liveRunningTask: true,
+        onMinimize: () {
+          SmartDialog.dismiss();
+          unawaited(windowManager.hide());
+        },
+        onClose: () {
+          SmartDialog.dismiss();
+          unawaited(windowManager.destroy());
+        },
+        onCancel: () => SmartDialog.dismiss(),
+        onNever: () {
+          unawaited(prefs.setBool(kNeverAskCloseWindow, true));
+          SmartDialog.dismiss();
+          unawaited(windowManager.hide());
+        },
+      ),
+    ));
   }
 
   @override
@@ -225,10 +274,24 @@ class _ManagerAppState extends State<ManagerApp> with WindowListener {
 ///  内存超阈值   → click_RAM_window_expedite（一键加速）
 ///  系统盘告急   → click_SystemDisk_window_deepclean（深度清理）
 ///  应用兼容弹窗 → click_AppCompatibility_window_uninstall
-///  均含 click_*_cancel / click_*_never（never 写本地“不再提示”）
+///  均含 click_*_cancel / click_*_never（never 落到「设置—高负载提示」里的开关）
 class ThresholdPopups {
   ThresholdPopups._();
-  static final seen = <String>{};
+
+  /// 跑主动作并把结果/失败摆出来。返回 null = 这个动作没什么好说的。
+  static Future<void> _runAndReport(Future<String?> Function() body) async {
+    String message;
+    try {
+      message = await body() ?? '';
+    } catch (e) {
+      message = '操作失败：${bridgeErrorText(e)}';
+    }
+    if (message.isEmpty) return;
+    // 弹窗已经 dismiss 了，这里紧跟着 showToast（与 onNever 那条同样的坑：
+    // 同一帧里 dismiss + showToast 会把提示一起带走，所以要等 dismiss 完成）
+    await SmartDialog.dismiss();
+    SmartDialog.showToast(message);
+  }
 
   static Future<void> maybeShow({
     required String key,
@@ -239,13 +302,17 @@ class ThresholdPopups {
     /// 主动作的事件 id（`expedite` / `deepclean` / `ProcessManagement`）。
     /// 按钮文案是中文而事件名是英文标识，不能拿文案拼事件名。
     required String actionId,
-    required VoidCallback action,
+    VoidCallback? action,
     String? route,
+
+    /// 动作做完要回报什么。参考实现的弹窗点完会说话（「完成加速」`:60`、
+    /// 「加速完成」`:278`），我们原来 `action();` 一句就完事——**返回值丢了、抛错也没人接**：
+    /// 用户点了看不到结果，失败了界面上一丝痕迹都没有。
+    /// 不传 = 这个动作自己会说（例如它会弹自己的页面/提示），这里就不重复报。
+    final Future<String?> Function()? report,
   }) async {
-    if (seen.contains(key)) return;
-    seen.add(key); // 入口即标记，防止轮询刷新期间重复排队弹窗
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('never_$key') ?? false) return;
+    if (!claimReminder(key)) return; // 入口即认领，防止轮询刷新期间重复排队弹窗
+    if (await isReminderMuted(key)) return;
 
     await SmartDialog.show(builder: (_) {
       return ThresholdPopupCard(
@@ -254,7 +321,13 @@ class ThresholdPopups {
         actionLabel: actionLabel,
         onAction: () {
           reportClick(clickEventFor(key, actionId));
-          action();
+          final reporter = report;
+          if (reporter != null) {
+            // 结果/失败都要说出来：原来 `action();` 之后就没有下文了
+            unawaited(_runAndReport(reporter));
+          } else {
+            action?.call();
+          }
           SmartDialog.dismiss();
           // 弹窗上下文不在 Router 子树内（SmartDialog 覆盖层），
           // 走全局路由引用完成跳转。
@@ -266,9 +339,12 @@ class ThresholdPopups {
         },
         onNever: () async {
           reportClick(clickEventFor(key, 'never'));
-          await prefs.setBool('never_$key', true);
-          if (seen.contains(key)) seen.remove(key);
-          SmartDialog.dismiss();
+          await setReminderMuted(key, muted: true);
+          // 必须先等弹窗关闭动画结束再弹提示：同一帧里 dismiss + showToast，
+          // 提示会被这次关闭动作一起带走（实机上量到的是「点了没反应」）。
+          await SmartDialog.dismiss();
+          // :466 这句是参考实现自己写的落点说明，照着它才该在设置页留重新开启的入口。
+          SmartDialog.showToast(kReminderMutedNotice);
         },
       );
     });
