@@ -1,4 +1,16 @@
-﻿param(
+﻿# 取证速记（实测得出，省得下轮再摸一遍）：
+#   **托盘菜单不用点托盘图标也能截**——它是独立子进程，直接带参数起：
+#       computer_manager.exe multi_window , tray_menu
+#     （第二段是窗口 id，占位即可；第三个才是分支名）
+#     §6.8 卡了好几轮就是因为一直在扫托盘图标坐标。
+#     注意：这样起出来的是默认 1280x720 runner 窗口（没走 place 贴边），
+#     截图验版式/文案足够，要验"贴边定位"仍得走真实托盘点击。
+#   托盘/子窗口的坐标**不要扫**，按类名 + pid 定位最稳：
+#     - 主窗口     cls=FLUTTER_RUNNER_WIN32_WINDOW
+#     - 加速球/托盘菜单子窗 cls=FLUTTER_MULTI_WINDOW_WIN32_WINDOW（按 pid 过滤）
+#   通知区域真身：Shell_TrayWnd → TrayNotifyWnd（本机 1200,973-1802,1013），
+#   其下 SysPager + ToolbarWindow32 才是图标位置；靠坐标扫会扫到别的窗口。
+param(
   [string]$Action = 'rect',
   [string]$Class = 'FLUTTER_RUNNER_WIN32_WINDOW',
   [int]$X = 0,
@@ -113,6 +125,7 @@ public class UI {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int w, int h, uint flags);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
 }
@@ -151,6 +164,16 @@ function Find-Target([string]$className) {
   [void][UI]::EnumWindows($script:cbRef, [IntPtr]::Zero)
   $script:cbRef = $null
   return $found
+}
+
+# Guard for cursor-moving actions: these send real input to whatever is under the
+# screen coordinate. If our window is hidden to the tray, the click lands on the
+# user's other windows instead - so refuse unless a target window is visible.
+if (@('click', 'hold', 'rclick', 'sclick', 'bclick', 'wheel', 'type') -contains $Action) {
+  if (@(Find-Target $Class).Count -eq 0) {
+    Write-Output "abort: no visible window (class=$Class hwnd=$Hwnd pid=$ProcId), action=$Action skipped"
+    exit 1
+  }
 }
 
 switch ($Action) {
@@ -263,6 +286,21 @@ switch ($Action) {
     foreach ($tgt in (Find-Target $Class)) {
       [void][UI]::ShowWindow($tgt.Hwnd, 9)   # SW_RESTORE
       Write-Output "restored hwnd=$($tgt.Hwnd)"
+    }
+  }
+  'top' {
+    # 置顶（HWND_TOPMOST=-1）：屏幕上盖着浏览器/IDE 时，合成点击也会被它们截走。
+    # 置顶后点击必定落在自己窗口上；用完必须 untop 还原，别把用户的窗口压在下面。
+    foreach ($tgt in (Find-Target $Class)) {
+      # SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE = 0x1|0x2|0x10
+      [void][UI]::SetWindowPos($tgt.Hwnd, [IntPtr](-1), 0, 0, 0, 0, 0x13)
+      Write-Output "topmost hwnd=$($tgt.Hwnd)"
+    }
+  }
+  'untop' {
+    foreach ($tgt in (Find-Target $Class)) {
+      [void][UI]::SetWindowPos($tgt.Hwnd, [IntPtr](-2), 0, 0, 0, 0, 0x13)
+      Write-Output "notopmost hwnd=$($tgt.Hwnd)"
     }
   }
   'max' {
