@@ -9,8 +9,21 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
 
 /// 获取主显示器名。
-/// TODO(占位)：真实多显示器枚举（EnumDisplayMonitors 等）的命名规则规格整理未确认，
-/// 主显示器按约定固定命名为 "Display 0"。
+///
+/// 原来直接 `Ok(vec!["Display 0"])` —— 那是个**编出来的名字**：注释里自己写着
+/// 「TODO(占位)」。界面上写着它像一句实测结论，实际与这台机器的硬件无关
+/// （本机真实设备名是 `QXL0001`，见下）。
+///
+/// 现在用 `EnumDisplayDevices` 读**系统自己写的** `DeviceString`（如 `QXL0001`），
+/// 取第一个（`iDeviceNum == 0`，即主显示器）。读不到时返回**空列表**而不是编一个名——
+/// 「没读到」和「有个叫 Display 0 的显示器」不是一回事。
+///
+/// ⚠ **故意不给适配层出口**（负向结论）：界面**没有可以放它的地方**。参考实现整张文案表里
+/// 与显示设备有关的只有「分辨率变动！」(`:432`) 与「分辨率变动！通知类型」(`:265`) 两句
+/// **日志**，搜「显示器 / 屏幕 / 刷新」零条界面标签；classes 里也只有一个 `DisplayFeatureState`
+/// 孤名。也就是说对面拿设备名去做什么没有第二处证据，接出来只能凭空造一行显示。
+/// 窗口尺寸那条路不需要它——工作区/主屏分辨率走 `get_monitor_work_size` 与
+/// `get_monitor_size`，这条只给名字。
 Future<List<String>> getMainMonitor() =>
     RustLib.instance.api.crateApiDeviceInfoGetMainMonitor();
 
@@ -18,8 +31,16 @@ Future<List<String>> getMainMonitor() =>
 Future<MonitorSize> getMonitorSize() =>
     RustLib.instance.api.crateApiDeviceInfoGetMonitorSize();
 
-/// 获取虚拟桌面工作区：SM_XVIRTUALSCREEN=76 / SM_YVIRTUALSCREEN=77 /
-/// SM_CXVIRTUALSCREEN=78 / SM_CYVIRTUALSCREEN=79。
+/// 获取工作区（窗口真正能放的那一片，已扣掉任务栏等停靠区）。
+///
+/// ⚠ 这里原先读的是 `SM_XVIRTUALSCREEN` / `SM_CXVIRTUALSCREEN` 那一组，**那是虚拟
+/// 桌面尺寸，不是工作区**：任务栏贴底时它仍然返回整块屏幕的高度（本机实测
+/// 1802×1013，而系统真实工作区是 1802×973，差 40 像素正好是任务栏）。
+/// 函数名写着 work_size，实现却不做这件事——窗口按它算高度，底边正好压在任务栏上。
+///
+/// 真要工作区得问 `SPI_GETWORKAREA`。注意它给的是**主显示器**的工作区（不是全部
+/// 显示器合起来那一片），坐标以主屏左上角为原点；多显示器各自的工作区要枚举
+/// `EnumDisplayMonitors` 才是，这里不夸大范围。
 Future<MonitorWorkSize> getMonitorWorkSize() =>
     RustLib.instance.api.crateApiDeviceInfoGetMonitorWorkSize();
 

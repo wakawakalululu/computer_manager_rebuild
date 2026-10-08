@@ -10,6 +10,13 @@ use anyhow::Context;
 
 /// 应用初始化：确保日志目录（exe 目录 logs\，失败回退当前工作目录 logs\）
 /// 存在，并记录初始化完成标记。返回 `Ok(())`。
+///
+/// ⚠ **功能上与 `utils::rust_backend_init` 完全重复**（同一个目录、同一套回退策略），
+/// 后者已经在启动路径上被调用（`RustApi.initBackendDirs`）。所以这里**故意不给出口**：
+/// 再接一次只会做两遍同样的 `create_dir_all`，而这个版本有个更差的地方——
+/// `current_exe()` 失败时**静默回退到相对路径 `logs`**（当前工作目录）。
+/// 程序可能是被服务用不同工作目录拉起来的，那时日志会落到一个没人找得到的地方，
+/// 而 `rust_backend_init` 至少会把"建目录失败"这件事报出来。
 pub fn init_app() -> anyhow::Result<()> {
     // frb codec: crateApiSimpleInitApp
     // 与 gui_log 模块保持同一目录选择策略：exe 目录优先，回退当前工作目录

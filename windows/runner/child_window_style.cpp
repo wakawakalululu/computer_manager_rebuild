@@ -17,10 +17,14 @@
 
 namespace {
 
-// 子引擎未使用 place 通道时的默认形态：还原参考实现资源悬浮窗
-// （窄长条、右上角停靠）。托盘菜单窗口会在显示前用 place 把自己搬走。
-constexpr int kPanelLogicalWidth = 200;
-constexpr int kPanelLogicalHeight = 104;
+// 子引擎未使用 place 通道时的默认形态。
+// ⚠ 这里原来写着"还原参考实现…窄长条(200x104)"，**那句注释是错的**：
+//   2026-10-08 用 PrintWindow 直取正在运行的参考实现量到，它的加速球窗口是
+//   **86x86 逻辑像素的圆**（`CLASS=FlutterMultiWindow`、`TITLE=accelerationBall`，
+//   物理 108x108 @ dpi 120），不是窄长条。改成方形与之对齐；
+//   托盘菜单/加速卡仍各自用 place 报自己的尺寸（见 #106）。
+constexpr int kPanelLogicalWidth = 86;
+constexpr int kPanelLogicalHeight = 86;
 constexpr int kMarginRight = 24;
 constexpr int kMarginTop = 24;
 
@@ -180,6 +184,30 @@ std::string HandlePlaceRequest(HWND hwnd, const std::vector<std::string>& f) {
   if (left < work.left) left = work.left;
   if (top < work.top) top = static_cast<int>(slot_y) + static_cast<int>(slot_h);
   if (top + height > work.bottom) top = work.bottom - height;
+
+  // 别把菜单摆在指针底下：托盘在屏幕下沿时弹出位置正好是鼠标所在的那块，
+  // 用户第一下点击会打在菜单上（点哪条都一样，等于随机选项）。命中就把菜单
+  // 沿槽位水平方向推开——推不開（屏幕就那么宽）才认了，不做上下翻转免得更难预期。
+  {
+    POINT cursor{};
+    if (::GetCursorPos(&cursor)) {
+      const bool under_cursor =
+          cursor.x >= left && cursor.x < left + width && cursor.y >= top &&
+          cursor.y < top + height;
+      if (under_cursor) {
+        int shifted = left;
+        if (cursor.x >= left + width / 2) {
+          shifted = left - width; // 指针在右半边：菜单往左让
+        } else {
+          shifted = left + width; // 指针在左半边：菜单往右让
+        }
+        // 让完仍要留在工作区内，否则这次让位比压着指针更糟
+        if (shifted >= work.left && shifted + width <= work.right) {
+          left = shifted;
+        }
+      }
+    }
+  }
 
   // SWP_NOACTIVATE：菜单窗口不能抢焦点，否则主窗口失焦、任务栏闪一下。
   if (!::SetWindowPos(hwnd, HWND_TOPMOST, left, top, width, height,

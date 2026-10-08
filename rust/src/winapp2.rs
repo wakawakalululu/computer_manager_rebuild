@@ -8,8 +8,11 @@
 //!   * `RECURSE`    → 递归扫描子目录（否则只扫目标目录一层）；
 //!   * `REMOVESELF` → 清理时先清空目录内容，再把目录本身一起删除；
 //!   * `N` 仅为编号且同一键名可重复出现（同一键多行必须累加，不能覆盖）；
-//! - `Detect` / `DetectFile` / `ExcludeKeyN`：已解析保存到结构体，但执行阶段忽略
-//!   （TODO：后续支持注册表/文件条件探测与命中排除，见 parse_str 内注释）。
+//! - `ExcludeKeyN`：扫描时**生效**——规则说"这些别删"的文件不进清理清单
+//!   （见 `is_excluded`）；随包的两份规则没写这个键，但 README 允许整体替换为
+//!   社区规则库（Winapp2 大量使用它），不实现就等于换规则后删了人家排除的文件。
+//! - `Detect` / `DetectFile`：已解析保存到结构体，但执行阶段忽略
+//!   （TODO：后续支持注册表/文件条件探测，见 parse_str 内注释）。
 //!
 //! 全部函数对无权限 / 被占用的文件与目录采取“静默跳过 + 日志”策略，尽力而为。
 
@@ -62,7 +65,7 @@ pub struct RuleEntry {
     /// DetectFile=（文件探测条件）——已解析但执行时忽略，留待后续支持
     #[serde(skip)]
     pub detect_file: Vec<String>,
-    /// ExcludeKeyN=（排除项）——已解析但执行时忽略，留待后续支持
+    /// ExcludeKeyN=（排除项）——扫描时生效，见 scan_entry_full 里的 is_excluded
     #[serde(skip)]
     pub exclude_keys: Vec<String>,
     /// 其他未知键（IconUrl 等），仅保留原始 `key=value` 字符串以便排查
@@ -310,9 +313,63 @@ pub fn scan_entry_full(
     // Windows 路径大小写不敏感，按小写路径去重（不同 FileKey 可能命中同一文件）
     let mut seen: HashSet<String> = HashSet::new();
     hits.retain(|h| seen.insert(h.path.to_lowercase()));
+    // ExcludeKeyN：规则明确说"这些别删"的条目必须真的排除掉。
+    // 随包的两份规则都没写这个键，所以这层此前看不出差别；但 README 写着
+    // 规则"可整体替换为社区规则库"（Winapp2 大量使用 ExcludeKey），不生效的话
+    // 换一份规则进来就会把人家明确排除的文件列进清理清单。
+    if !entry.exclude_keys.is_empty() {
+        hits.retain(|h| !is_excluded(&h.path, &entry.exclude_keys));
+    }
     let mut dseen: HashSet<String> = HashSet::new();
     remove_dirs.retain(|d| dseen.insert(d.to_lowercase()));
     (hits, remove_dirs)
+}
+
+/// 路径是否命中某条 `ExcludeKeyN`。
+///
+/// 语法与 `FileKeyN` 一致：`目录|模式1;模式2`，目录支持 `%ENV%` 展开与
+/// `|` 分隔的多个根；模式为空按 `*` 处理。目录匹配按前缀，模式按文件名匹配
+/// （Windows 大小写不敏感）。
+fn is_excluded(path: &str, keys: &[String]) -> bool {
+    // 规则里路径一般写成 `C:/a`，而命中路径是 `C:\a\...`——直接比前缀永远不匹配。
+    // 两边统一成小写 + 正斜杠再比。
+    let lower = path.to_lowercase().replace('\\', "/");
+    let name = Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    for key in keys {
+        let mut parts = key.split('|');
+        let Some(dir_tpl) = parts.next() else { continue };
+        let dir = expand_env(dir_tpl.trim()).to_lowercase().replace('\\', "/");
+        if dir.is_empty() {
+            continue;
+        }
+        // 前缀必须落在目录边界上：`C:/a` 命中 `C:/a\x`，但不能误配 `C:/ab\x`
+        let under_dir = dir.ends_with('/');
+        if !lower.starts_with(&dir) {
+            continue;
+        }
+        if !under_dir && !lower[dir.len()..].starts_with('/') {
+            continue;
+        }
+        let patterns: Vec<String> = parts
+            .next()
+            .unwrap_or("*")
+            .split(';')
+            .map(|p| p.trim().to_lowercase())
+            .filter(|p| !p.is_empty())
+            .collect();
+        let patterns = if patterns.is_empty() {
+            vec!["*".to_string()]
+        } else {
+            patterns
+        };
+        if patterns.iter().any(|p| wildcard_match(p, &name)) {
+            return true;
+        }
+    }
+    false
 }
 
 /// 递归扫描（RECURSE）：walkdir，最大深度 8，跳过符号链接，权限错误静默跳过。
@@ -624,5 +681,29 @@ Description=没有 FileKey
         assert_eq!(e.detect.len(), 1);
         assert_eq!(e.exclude_keys.len(), 1);
         assert_eq!(e.extra_keys.len(), 1); // IconUrl
+    }
+
+    #[test]
+    fn exclude_key_filters_hits() {
+        // ExcludeKeyN 必须在扫描期真的挡掉命中，否则换一份社区规则进来
+        // 就会把规则明确说"别删"的文件列进清理清单。
+        // 规则里一般写正斜杠（C:/a），命中路径是反斜杠——两边都要归一化。
+        let keep = r"C:/a|keep.txt".to_string();
+        let txt = r"C:/a|*.txt".to_string();
+        let two = r"C:/a|keep.txt;*.log".to_string();
+        let all = r"C:/a|".to_string();
+        assert!(is_excluded(r"C:\a\keep.txt", &[keep.clone()]));
+        // 大小写不敏感（Windows）
+        assert!(is_excluded(r"C:\A\KEEP.TXT", &[txt]));
+        // 目录只按前缀匹配：C:/a 不该误配 C:/ab
+        assert!(!is_excluded(r"C:\ab\keep.txt", &[keep.clone()]));
+        // 模式不符就不算排除
+        assert!(!is_excluded(r"C:\a\other.log", &[keep]));
+        // 分号多模式
+        assert!(is_excluded(r"C:\a\b.log", &[two]));
+        // 模式为空按 *
+        assert!(is_excluded(r"C:\a\b.tmp", &[all]));
+        // 规则没写排除键时一律不排除
+        assert!(!is_excluded(r"C:\a\b.tmp", &[]));
     }
 }

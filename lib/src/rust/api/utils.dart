@@ -28,17 +28,41 @@ Future<String> getAppCurrentDir() =>
 ///
 /// windows 0.58 的 `CreateMutexW` 仅在句柄无效（真正创建失败）时返回 `Err`；
 /// “互斥体已存在”时仍返回 `Ok(有效句柄)`，因此成功后需立即读取 GetLastError 判定。
+///
+/// ⚠ **故意不给出口**（负向结论）：单实例这件事已经由 `windows_single_instance` 在
+/// 启动路径上强制过了（`main.dart` 的 `ensureSingleInstance(args, 'cm_..._single')`）。
+/// 再接一遍只是多一个 `Global\` 命名对象；更要紧的是它的"已存在"分支直接
+/// `process::exit(0)`——挂到启动路径上等于多开一条**静默退出**通道：第二次打开会
+/// 表现为"点了没反应"，而不是一句"已经有实例在跑"。
+/// **重复，且接出来更差，不是缺口。**
 Future<void> createMutex() => RustLib.instance.api.crateApiUtilsCreateMutex();
 
 /// 设置进程环境变量。
+///
+/// ⚠ **故意不给出口**：全项目 `grep` 不到任何一处读某个由它写入的变量，
+/// 接出来就是一个"改了点什么、但没人看"的隐形动作。
+/// （真要用，`std::env::set_var` 在 Rust 2024 起是 `unsafe`，接线时得一并处理。）
 Future<void> setEnv({required String key, required String value}) =>
     RustLib.instance.api.crateApiUtilsSetEnv(key: key, value: value);
 
 /// 设置开发模式开关（写入环境变量 IS_DEV，"true"/"false"）。
+///
+/// ⚠ **故意不给出口**：这个变量**只写不读**——全项目 `grep IS_DEV` 只有写它的地方，
+/// 没有任何一处读它来决定行为（`_IS_DEV_ENV_KEY` 的键名注释里也写着
+/// 「TODO(假设)：参考实现真实键名规格整理未确认，这里统一约定为 IS_DEV」）。
+/// 键名本身就没确认过，接一个"开发模式开关"进设置页等于**凭空造一个无效开关**：
+/// 用户拨了它，程序行为一点不变。
+/// 真要接，前提是先确定参考实现真实的键名**且**有地方读它。
 Future<void> setIsDev({required bool isDev}) =>
     RustLib.instance.api.crateApiUtilsSetIsDev(isDev: isDev);
 
 /// 取走（drain）全部待通知消息并以换行拼接返回；无消息时返回空字符串。
+///
+/// ⚠ **故意不给出口**（负向结论）：生产者 [push_notify] 在本 crate 里**没有任何调用点**
+/// （只有 frb 生成的胶水，且那条 `TODO(集成期)` 就写在它上面：sysinfo / disk_scan 尚未接入推送）。
+/// 也就是说这个 drain 永远返回空串——在 Dart 侧起一个轮询去读它，换来的只有一条
+/// 每秒醒一次、什么都拿不到的定时器，界面上还挂着"已接上 Rust 通知"的假象。
+/// **要接就得两端一起接**：先让某个 Rust 模块真往队列里推，再给 Dart 加消费点。
 Future<String> getRustNotifyMsg() =>
     RustLib.instance.api.crateApiUtilsGetRustNotifyMsg();
 
@@ -46,6 +70,12 @@ Future<String> getRustNotifyMsg() =>
 ///
 /// 说明：真实的系统数据采集（CPU/内存/进程等）由常驻 agent 进程（cm_agent bin）
 /// 负责；GUI 侧此调用仅保留一个低频心跳线程占位，不阻塞 UI 线程。
+///
+/// ⚠ **故意不给出口**：这个线程每 60 秒打一行 `collect tick` 到日志，**什么都不采**。
+/// 接上它换来的只有一条每分钟一次的日志噪音（而且现在 log 桥装好了，这个噪音会真的落盘）。
+/// 真正的采集在 `cm_agent` 里（`ResidentAgentGuard` 守着那个进程），GUI 再开一个
+/// 什么都不干的线程只会让人以为"GUI 侧也在采"。
+/// 将来要接，必须先把循环体换成真采集，而不是先接这个占位。
 Future<void> mainCollect() => RustLib.instance.api.crateApiUtilsMainCollect();
 
 /// 后端初始化：确保 exe 目录下 logs\ 存在，并输出初始化标记日志。
@@ -53,10 +83,31 @@ Future<void> rustBackendInit() =>
     RustLib.instance.api.crateApiUtilsRustBackendInit();
 
 /// 后端清理：删除 exe 目录 temp\ 下修改时间超过 24 小时的文件。
+///
+/// ⚠ **故意不给出口**（负向结论）：全项目**没有任何一处往 `exe_dir\temp` 写东西**
+/// （`grep join("temp")` 只有本函数在读它），我们真正的临时产物都落在系统
+/// `%TEMP%`（`collect_log` 的 `cm_collect_<ts>.zip`、图标探针）。所以在 Dart 侧
+/// 接上它，效果永远是"清了一个不存在的目录"——一个看起来在做卫生工作、
+/// 实际什么都不做的动作。
+/// 遗留问题写在这儿，别让它假装已解决：日志包 zip 会长期留在 `%TEMP%`，
+/// 要治它得改 `collect_log` 的落盘位置或加"上传成功后删包"，而那两处都需要
+/// 参考实现的第二处证据（它是否也这样留、何时删）才能动。
 Future<void> rustBackendClean() =>
     RustLib.instance.api.crateApiUtilsRustBackendClean();
 
 /// 重启应用：拉起当前 exe 后立即退出当前进程（正常路径不会返回）。
+///
+/// ⚠ **故意不给出口**（负向结论）：参考实现整张文案表里带"重启"的只有
+/// 「存在需要重启云电脑才生效的补丁」那一句，而它是**补丁页的挂起提示**
+/// （已由 `rebootNotice` 落地并有测试钉着），不是"重启应用"的按钮。
+/// 也就是说这个 codec 在对面**没有对应界面入口**——多半用在自己的更新流程里，
+/// 而本项目没有更新源与安装器。接出来只能凭空造一个「立即重启」按钮，
+/// 那是编功能，不是补差距。函数本身没问题（探针实测：spawn 出的子进程在父进程
+/// `exit` 后能独立存活），缺的是触发它的产品前提。
+/// 现在多了**一条佐证**：`classes.txt` 里有 `_ClientUpdateDialogContentState`（客户端更新
+/// 对话框的内容区），加上文案表那 55 条下载/升级串——说明对面这个"重启"是**更新流程内部**的
+/// 一步，而不是工具箱里一个独立按钮。那条流程我们没有（没有更新源、没有安装器），
+/// 所以这整批（本函数 + 5 个安装 codec + `is_x86_cpu`）是同**一个**缺口，别当 7 条分开补。
 Future<void> restartApplication2() =>
     RustLib.instance.api.crateApiUtilsRestartApplication2();
 

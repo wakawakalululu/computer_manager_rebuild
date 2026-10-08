@@ -7,6 +7,8 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `append_log`, `open_log_file`, `write_line`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `GuiFileLogger`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `enabled`, `flush`, `log`
 
 /// 追加一条 INFO 级 GUI 日志，返回已写入的行文本。
 Future<String> info({required String msg}) =>
@@ -19,3 +21,11 @@ Future<String> warn({required String msg}) =>
 /// 追加一条 ERROR 级 GUI 日志，返回已写入的行文本。
 Future<String> error({required String msg}) =>
     RustLib.instance.api.crateApiGuiLogError(msg: msg);
+
+/// 把 `log` crate 全局指向 [GuiFileLogger]。
+///
+/// **只能调一次**：第二次 `set_logger` 返回 `Err`（全局 logger 已被占用），
+/// 那种情况下忽略即可——上一次的安装仍然有效。
+/// 写日志失败**不抛**：启动期打一条日志失败就整个起不来，比不打更糟。
+Future<void> initLogBridge() =>
+    RustLib.instance.api.crateApiGuiLogInitLogBridge();

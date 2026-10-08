@@ -6,9 +6,9 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `align4`, `apply_and_mask`, `bitmap_size`, `collect_uninstall`, `collect_version_strings`, `display_icon_index`, `display_icon_path`, `expand_env_vars`, `extract_pe_icon`, `hosts_path`, `icon_to_rgba`, `is_default_host_line`, `load_version_map`, `mount_letter`, `read_run_key`, `read_version_block`, `run_tool`, `shell_icon`, `to_wide`, `with_com_initialized`, `wmi_connection`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Win32_ComputerSystem`, `Win32_NetworkAdapterConfiguration`, `Win32_OperatingSystem`, `Win32_QuickFixEngineering`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `align4`, `app_launch_target`, `apply_and_mask`, `bitmap_size`, `boot_mode_label`, `collect_uninstall`, `collect_version_strings`, `display_icon_index`, `display_icon_path`, `expand_env_vars`, `extract_pe_icon`, `hosts_path`, `icon_to_rgba`, `image_version_file`, `is_32bit_os`, `is_default_host_line`, `load_version_map`, `mount_letter`, `netsh_name_for`, `parse_boot_time_ms`, `read_boot_event_xml`, `read_run_key`, `read_version_block`, `run_tool`, `shell_icon`, `to_wide`, `with_com_initialized`, `wmi_connection`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Win32_ComputerSystem`, `Win32_NetworkAdapterConfiguration`, `Win32_OperatingSystem`, `Win32_PnPEntity`, `Win32_Printer`, `Win32_QuickFixEngineering`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// 禁用系统代理（写 HKCU\...\Internet Settings\ProxyEnable = 0）
 Future<void> disableProxy() =>
@@ -23,7 +23,17 @@ Future<void> enableAdapter({required String adapterName}) =>
 Future<bool> fixHostConfiged() =>
     RustLib.instance.api.crateApiSysinfoFixHostConfiged();
 
-/// 适配器数量（条数）
+/// 适配器数量（WMI 行数）
+///
+/// ⚠ **故意不给 UI 出口**：这个数**不能**当"网卡数量"的判据。
+/// `Win32_NetworkAdapterConfiguration` 一行一个**适配器配置**，包含 WAN Miniport、
+/// Network Monitor、内核调试适配器等一堆没在用的虚拟网卡——实测本机它返回 **12**，
+/// 而真正在用的只有 **1** 张（`netsh interface show interface` 只有一条）。
+/// 拿它去报「网卡数量异常」(`:66`) 会在一台完全正常的机器上喊故障。
+///
+/// 体检那边用的是**带真默认网关的网卡数**（见 `ExaminationSource.adapterList` /
+/// `RustApi.adapterList`，判据是"多张同时在用"），那才是"出站路由在看运气"的语义。
+/// 所以这条 Rust 函数保留（接口面对齐需要），但适配层**不接出口**。
 Future<BigInt> getAdapterSize() =>
     RustLib.instance.api.crateApiSysinfoGetAdapterSize();
 
@@ -45,7 +55,13 @@ Future<bool> hasManualProxy() =>
 Future<bool> hostConfiged() =>
     RustLib.instance.api.crateApiSysinfoHostConfiged();
 
-/// 外网连通性探测：TCP 连接 1.1.1.1:80，1 秒超时
+/// TCP 连通性探测：连 `1.1.1.1:80`，1 秒超时。
+///
+/// ⚠ 这**不是**「外网能不能上」的结论，只是"到 Cloudflare 某个 IP 的 80 端口
+/// 能不能建连"。挡门户（captive portal）、只放行 443 的代理、或把 1.1.1.1:80
+/// 黑洞掉的网络，都会在这里报不通，而机器其实能上网。
+/// 所以界面上一律说「外网探测」并给「看实测」的出口，不把这一位的 false
+/// 当成"网络故障"的定论。
 Future<bool> netAvailable() =>
     RustLib.instance.api.crateApiSysinfoNetAvailable();
 
@@ -96,6 +112,11 @@ Future<void> uninstallApp({required String uninstallKey}) =>
 /// 监控式卸载。
 /// TODO：参考实现在启动卸载程序后会轮询等待卸载进程退出并回报进度；
 /// 当前先复用直接启动逻辑，监控循环留待后续补充。
+///
+/// ⚠ **故意不给出口**：它现在**没有监控**，只是转手调 `uninstall_app`。
+/// 名字里的 "Moint" 会让人以为它回报进度——接一个"监控式卸载"按钮进去，
+/// 实际既不监控也不回报，比老实叫「卸载」更差。
+/// 真要接，得先把轮询循环写出来（等卸载进程退出再回报），那才是这个接口的含义。
 Future<void> uninstallAppMoint({required String uninstallKey}) =>
     RustLib.instance.api
         .crateApiSysinfoUninstallAppMoint(uninstallKey: uninstallKey);
@@ -109,6 +130,13 @@ Future<void> installStartService(
 
 /// 版本号分段比较。返回单元素向量："1"=a 更新，"0"=相同，"-1"=a 更旧。
 /// 以 . - _ 作为分段符；数字段按数值比较，否则按字符串比较。
+///
+/// ⚠ **故意不给 UI 出口**（负向结论）：缺的不是"会不会比"，而是**没有"该比成多少"的来源**——
+/// 本项目读 `config.ini` 只取 `[config] basehost` 与 `[compat] incompatible` 两个键
+/// （`feedback_service.readIniSection` 的调用点就这两处），既没有组件版本基线也没有下发通道。
+/// 接进体检就只能凭空定一个阈值，那是编造判据。
+/// 参考实现同族的是「开始修复组件项 / 修复结果为」那套**组件修复**流程，
+/// 而修复要的下载与安装能力我们没有（与 5 个补丁安装 codec 同批结论）。
 Future<List<String>> judgeVersion(
         {required String versionA, required String versionB}) =>
     RustLib.instance.api
@@ -145,6 +173,12 @@ Future<bool> isPathExits({required String path}) =>
     RustLib.instance.api.crateApiSysinfoIsPathExits(path: path);
 
 /// 把系统信息（版本 + 机型）写入 %ProgramData%\cm_rebuild\os_info.json
+///
+/// ⚠ **故意不给出口**（负向结论）：这个文件**只写不读**——全项目 `grep os_info`
+/// 只有这里一个写入点，没有任何一处读它，agent 上报走的也不是这条路径。
+/// 接出来等于每次点一下就在系统目录里多写一个没人看的 json（还要在
+/// `%ProgramData%` 下建目录），属于「改了什么、但没人看」的隐形动作。
+/// 与 [set_env] / [main_collect] 同族。**重复，不是缺口。**
 Future<void> setOsInfo() => RustLib.instance.api.crateApiSysinfoSetOsInfo();
 
 /// 启动 exe，返回子进程 PID 字符串
@@ -157,6 +191,13 @@ Future<List<String>> readCupInfo() =>
     RustLib.instance.api.crateApiSysinfoReadCupInfo();
 
 /// 鼠标坐标（windows crate GetCursorPos），返回 [x, y] 字符串
+///
+/// ⚠ **故意不给出口**（负向结论）：本项目所有弹层定位都按**托盘图标槽位 / 加速球的原生
+/// rect** 走（`tray_menu_host`、`acceleration_tools_host` 把矩形推给子窗口，由原生按目标
+/// 显示器 DPI 换算并夹取到工作区），没有任何一处需要轮询鼠标位置。接出来就是一个
+/// 定时读坐标、读完没处用的空转——与 [main_collect] 同族。
+/// 它**该保留**的部分已经保留了：读失败返回空表而不是 `(0, 0)`（那是"API 失败、
+/// 结果却像个真答案"那一族的修复）。
 Future<List<String>> getCursorPos() =>
     RustLib.instance.api.crateApiSysinfoGetCursorPos();
 
@@ -212,6 +253,22 @@ Future<List<String>> getInstalledPatchIds() =>
 Future<List<String>> rebootPendingReasons() =>
     RustLib.instance.api.crateApiSysinfoRebootPendingReasons();
 
+/// 开机启动耗时（毫秒）——真正的"这次开机花了多久"。
+///
+/// 数据源是 Windows 自己写的启动诊断事件：
+/// `Microsoft-Windows-Diagnostics-Performance/Operational` 的 EventID 100，字段 `BootTime`
+/// （本机实测 32016ms，且**当前用户不提权就能读**）。
+/// ⚠ **不要拿 `LastBootUpTime` 与现在时间的差冒充它**——那是"开机以后跑了多久"，
+///   见下面 `get_system_boot_up_duration` 上方的说明（任务单 #100 就是为了不许混用）。
+/// ⚠ 也**不要用 `BootEndTime - BootStartTime` 代替**：本机实测两者相差 173 秒，
+///   而事件自己给的 `BootTime` 是 32.016 秒——差的那段是等待用户登录之类，不是一回事。
+///
+/// 读不到就返回 `None`：通道被关、无权限、或这台机器从没写过这条事件时，
+/// 界面上就不该出现这一行，而不是写一个 0（"失败变正常值"是本项目反复扫的那类缺陷）。
+/// 取最新一条（`/rd:true`）：用户问的是"这次开机"，不是这台云电脑第一次开机。
+Future<BigInt?> getBootTimeMs() =>
+    RustLib.instance.api.crateApiSysinfoGetBootTimeMs();
+
 /// 用 wusa.exe 静默安装指定 KB 补丁（/quiet /norestart，需管理员权限）。
 /// kb_id 可传 "KB5031354" 或 "5031354"，内部抽取数字段。
 Future<String> wusaInstallPatch({required String kbId}) =>
@@ -252,6 +309,11 @@ Future<List<String>> getProcessFileDescription({required String exePath}) =>
 /// 参考实现把 HICON 编成 PNG 再交给前端，但这条 codec 的返回类型是 `List<String>`，
 /// 规格清单看不出字符串里装的是路径还是编码后的位图，故保持返回 exe 路径；
 /// 前端图标实际由 [extract_app_icon] 直接取 RGBA 像素渲染，不经这条路。
+///
+/// ⚠ **故意不给适配层出口**（第 15 条负向结论）：进程页的图标**已经在画**
+/// （`AppIconImage(displayIcon: p.exe)` → [extract_app_icon]，本机实测 Qoder/CodeBuddy
+/// 都出图）。这条路即使接上也只是同一个功能换了个语义不明的返回类型。
+/// **重复，不是缺口**——reachable 清单会一直列着它，别照着数字"补"。
 Future<List<String>> getProcessIco({required String exePath}) =>
     RustLib.instance.api.crateApiSysinfoGetProcessIco(exePath: exePath);
 
@@ -290,10 +352,26 @@ Future<void> changeStartupStatus(
 /// 开机时长（毫秒）：WMI Win32_OperatingSystem.LastBootUpTime 与当前时间之差。
 /// 返回单元素向量（毫秒字符串）。WMI 时间形如 "20240105103000.500000+480"，
 /// 取前 14 位按本地时间与本地当前时间相减，时区偏移自然抵消。
+///
+/// ⚠ **名字与数据不是一回事，别把界面措辞改回去**：参考实现的文案表里
+/// 「开机启动耗时」(`zh_strings.txt:259`) 对应的就是这个 codec（`frb_calls.txt:73`
+/// `crateApiSysinfoStartupRGetSystemBootUpDuration`），但函数体算的是
+/// `LastBootUpTime` 到现在的差——**开机之后已经跑了多久**，不是"上一次开机花了多久"。
+/// 所以 Dart 侧那行显示写的是「已开机 X」（`app_manage_page.dart` 的启动项页副标题），
+/// 而不是表里那个名字。照抄「开机启动耗时」就是让标签承诺一个这个数据源给不出的数
+/// （"名字承诺 X、函数体做 Y"这一族，本项目已经踩过好几次）。
+/// 真想要那个数得换数据源（`Diagnostic-Performance` 事件日志里的总耗时），而手头材料
+/// 除了一个标签和一个 codec 名，**没有任何取法、权限或失败形态的说明**——不许照名字编。
 Future<List<String>> getSystemBootUpDuration() =>
     RustLib.instance.api.crateApiSysinfoGetSystemBootUpDuration();
 
 /// 启动项名称列表（read_startup_list 的 name 列）
+///
+/// ⚠ **故意不给适配层出口**（第 12 条负向结论）：函数体就是
+/// `read_startup_list()` 再 `.map(name)`——本项目**已经**接了 `readStartupList`
+/// （启动项页与体检都走它，那才是要的地方：还得拿 location/enabled）。
+/// 接这个只多跑一遍注册表扫描、少两列信息，而 reachable 清单会一直诱人来"收掉"它。
+/// 与 `get_process_ico`、`start_exe`、`get_app_current_dir` 同一类：**重复，不是缺口**。
 Future<List<String>> getName() => RustLib.instance.api.crateApiSysinfoGetName();
 
 /// 存储感知开关状态：读 HKCU\...\StoragePolicy 的 "01" DWORD（0=关 1=开），
@@ -311,6 +389,16 @@ Future<void> showStrogeSense() =>
 
 /// 执行镜像升级包：校验存在后按扩展名分发（exe 直接启动、msu 走 wusa、
 /// bat/cmd 交给 cmd /C），不等待执行完成
+///
+/// ⚠ **故意不给 UI 出口**（第 10 条负向结论，2026-10-08 核实）：这个函数要的是
+/// **一个已经下载好的升级包路径**，而"升级包从哪来"本项目答不出来——
+/// 参考实现自己的 frb 调用清单里也只有 `ExecImagePackage` 与 `GetImageVersion`
+/// 两条，**没有任何"发现/列举升级包"的接口**（`docs/extracted/frb_calls.txt:79-81`），
+/// 说明包路径来自它的后端推送。文案表里虽有「系统升级工具」`:527`、
+/// 「发现升级包」`:229`、「待升级」`:227`，但 `routes_ui.txt` 与 `click_events.txt`
+/// 搜 upgrade/update **零命中**，没有第二处证据说明入口摆在哪、点了做什么。
+/// 与补丁安装那 5 个 codec 同一处境：**没有更新源就别画按钮**，
+/// 画出来就是个点了没反应（或更糟：随便找个 exe 跑起来）的假 affordance。
 Future<void> execImagePackage({required String packagePath}) =>
     RustLib.instance.api
         .crateApiSysinfoExecImagePackage(packagePath: packagePath);
@@ -325,6 +413,15 @@ Future<bool> isX86Cpu() => RustLib.instance.api.crateApiSysinfoIsX86Cpu();
 
 /// 应用列表：枚举开始菜单（所有用户 + 当前用户）的 .lnk 项，
 /// 去重排序后最多返回 500 条
+///
+/// ⚠ **故意不给出口**（负向结论，可达面最后一条）：**没有任何界面证据说得出这些名字要摆在哪**。
+/// 找到的只有两个孤立类名 `_AppSeletectorState` 与 `_ShortcutRegistrarState`
+/// （`classes.txt:91` 附近），它们合起来确实像"从快捷方式里选一个应用"的控件，但是：
+/// 文案表搜「开始菜单 / 快捷方式 / 选择 / 添加应用」**全部零命中**，
+/// `routes_ui.txt` / `page_route_extensions.txt` / `click_events.txt` 也没有对应条目。
+/// 也就是说对面有没有这一屏、那一屏标题叫什么、选完拿去做什么，材料都没给——
+/// 照两个类名搭一个"选应用"弹层就是编布局（本项目一路在拒的那一类）。
+/// **要翻案需要的新证据**：该弹窗的任一句原话（标题/按钮/空态），或它的路由/埋点名。
 Future<List<String>> getAppInfo() =>
     RustLib.instance.api.crateApiSysinfoGetAppInfo();
 
@@ -333,9 +430,21 @@ Future<List<String>> getAppInfo() =>
 Future<List<String>> getVersionInfo() =>
     RustLib.instance.api.crateApiSysinfoGetVersionInfo();
 
-/// 打开应用：路径存在则直接 spawn，否则交给 cmd start 按名称/协议解析
+/// 打开应用：交给系统 ShellExecute 按路径/协议解析。
+///
+/// 原来这里对非路径分支拼 `cmd /C start "" <target>`：**cmd 会把 target 里的
+/// `&`、`|`、重定向当命令分隔符**，那是命令注入——只要 target 来自列表项、
+/// 剪贴板或启动参数就能执行任意命令。改用 ShellExecuteW：不经 cmd 解析，
+/// 单个参数原样传下去。
 Future<void> openApp({required String target}) =>
     RustLib.instance.api.crateApiSysinfoOpenApp(target: target);
+
+/// 组件体检探针：打印机 / 外设 / 启动环境。
+///
+/// `Win32_PnPEntity` 全量枚举在本机是几百行、1~2s，只在体检里调一次；
+/// 拿不到 WMI（服务被停、权限受限）时整个探针报错，由 Dart 侧转成"未取到"。
+Future<ComponentProbe> componentProbe() =>
+    RustLib.instance.api.crateApiSysinfoComponentProbe();
 
 /// 网络适配器信息（对应 WMI Win32_NetworkAdapterConfiguration）
 class AdapterInfo {
@@ -346,6 +455,10 @@ class AdapterInfo {
   final bool dhcpEnabled;
   final List<String> dnsServers;
 
+  /// netsh 认的接口名。改 DNS / 启停网卡必须用它，不能用 description（见
+  /// [netsh_name_for]）。读不到就是空串——那台网卡不能拿去做 netsh 动作。
+  final String netshName;
+
   const AdapterInfo({
     required this.description,
     required this.macAddress,
@@ -353,6 +466,7 @@ class AdapterInfo {
     required this.gateways,
     required this.dhcpEnabled,
     required this.dnsServers,
+    required this.netshName,
   });
 
   @override
@@ -362,7 +476,8 @@ class AdapterInfo {
       ipAddresses.hashCode ^
       gateways.hashCode ^
       dhcpEnabled.hashCode ^
-      dnsServers.hashCode;
+      dnsServers.hashCode ^
+      netshName.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -374,7 +489,8 @@ class AdapterInfo {
           ipAddresses == other.ipAddresses &&
           gateways == other.gateways &&
           dhcpEnabled == other.dhcpEnabled &&
-          dnsServers == other.dnsServers;
+          dnsServers == other.dnsServers &&
+          netshName == other.netshName;
 }
 
 /// 应用图标像素（行主序 RGBA），由界面直接解码成图片，不需要经过 PNG 编码。
@@ -401,6 +517,59 @@ class AppIconPixels {
           width == other.width &&
           height == other.height &&
           rgba == other.rgba;
+}
+
+/// 组件体检要用的实测数据。项名照参考实现自带的：「外设检测」(:478)、
+/// 「打印机配置」(:310)、「启动环境」(:164)；磁盘与网卡两项
+/// （「磁盘检查」:233、「网卡状态」:529）由既有接口给，不在这里重复。
+class ComponentProbe {
+  /// 打印机名（按名去重）
+  final List<String> printers;
+
+  /// 默认打印机；没设默认时为空
+  final String? defaultPrinter;
+
+  /// 处于离线状态的打印机
+  final List<String> offlinePrinters;
+
+  /// 带故障码的在位设备名（最多列 8 个）
+  final List<String> problemDevices;
+
+  /// 带故障码的在位设备总数
+  final int problemDeviceCount;
+
+  /// "UEFI" / "Legacy BIOS" / "未知"
+  final String bootMode;
+
+  const ComponentProbe({
+    required this.printers,
+    this.defaultPrinter,
+    required this.offlinePrinters,
+    required this.problemDevices,
+    required this.problemDeviceCount,
+    required this.bootMode,
+  });
+
+  @override
+  int get hashCode =>
+      printers.hashCode ^
+      defaultPrinter.hashCode ^
+      offlinePrinters.hashCode ^
+      problemDevices.hashCode ^
+      problemDeviceCount.hashCode ^
+      bootMode.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ComponentProbe &&
+          runtimeType == other.runtimeType &&
+          printers == other.printers &&
+          defaultPrinter == other.defaultPrinter &&
+          offlinePrinters == other.offlinePrinters &&
+          problemDevices == other.problemDevices &&
+          problemDeviceCount == other.problemDeviceCount &&
+          bootMode == other.bootMode;
 }
 
 /// 磁盘信息
@@ -467,6 +636,10 @@ class InstalledAppInfo {
   /// DisplayIcon 原值，形如 `"C:\Path\a.exe",0` 或 `a.exe,1`；可能为空
   final String displayIcon;
 
+  /// 能直接启动的 `.exe` 全路径；`None` = 这个应用**推不出**启动目标
+  /// （图标指向 .ico/只给文件名/路径已失效）。界面据此不给「启动」入口。
+  final String? launchTarget;
+
   const InstalledAppInfo({
     required this.name,
     required this.version,
@@ -474,6 +647,7 @@ class InstalledAppInfo {
     required this.uninstallKey,
     required this.uninstallString,
     required this.displayIcon,
+    this.launchTarget,
   });
 
   @override
@@ -483,7 +657,8 @@ class InstalledAppInfo {
       publisher.hashCode ^
       uninstallKey.hashCode ^
       uninstallString.hashCode ^
-      displayIcon.hashCode;
+      displayIcon.hashCode ^
+      launchTarget.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -495,7 +670,8 @@ class InstalledAppInfo {
           publisher == other.publisher &&
           uninstallKey == other.uninstallKey &&
           uninstallString == other.uninstallString &&
-          displayIcon == other.displayIcon;
+          displayIcon == other.displayIcon &&
+          launchTarget == other.launchTarget;
 }
 
 /// 内存信息（单位：字节）

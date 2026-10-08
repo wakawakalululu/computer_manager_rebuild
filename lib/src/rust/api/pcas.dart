@@ -6,8 +6,49 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// 拉起 PCAS 认证客户端：
-/// - 客户端已安装（路径存在）→ 直接 spawn 该 exe；
-/// - 未安装 → 经 explorer.exe 打开默认浏览器访问兜底链接（占位行为）。
-Future<void> openPcasClient() =>
+// These functions are ignored because they are not marked as `pub`: `pcas_client_path`
+
+/// 认证客户端在默认安装位置下是否存在。
+///
+/// 单独给一个探测口，是为了让**界面**能在拉起之前就说出"未安装"，
+/// 而不是等拉起失败再猜——原来的写法在客户端不存在时会去开一个
+/// **我们自己占位的网址**（那条分支已删除，理由见文件里那段注释），
+/// 那等于用一个猜来的行为冒充产品行为。
+Future<bool> pcasClientInstalled() =>
+    RustLib.instance.api.crateApiPcasPcasClientInstalled();
+
+/// 拉起 PCAS 认证客户端。
+///
+/// **只有客户端存在时才做事**；不存在就返回"什么都没起"，
+/// 不再打开兜底网址（那条分支连同 `PCAS_FALLBACK_URL` 一起停用，理由见上）。
+/// 调用方应先问 [pcas_client_installed]，这里的返回值只用来如实报告结果。
+Future<PcasLaunchOutcome> openPcasClient() =>
     RustLib.instance.api.crateApiPcasOpenPcasClient();
+
+/// 拉起 PCAS 认证客户端的结果：告诉调用方到底是哪条路走通了。
+///
+/// 原来两条分支都返回 `Ok(())`，调用方无从分辨——客户端没装时它悄悄开了浏览器，
+/// 界面上却像"客户端已启动"。这里把事实带回去。
+class PcasLaunchOutcome {
+  /// true = 真的拉起了客户端；false = 客户端不存在，走了兜底链接
+  final bool clientStarted;
+
+  /// 走兜底分支时为 true，提示文案别自称"已启动客户端"
+  final bool fellBackToUrl;
+
+  const PcasLaunchOutcome({
+    required this.clientStarted,
+    required this.fellBackToUrl,
+  });
+
+  @override
+  int get hashCode => clientStarted.hashCode ^ fellBackToUrl.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PcasLaunchOutcome &&
+          runtimeType == other.runtimeType &&
+          clientStarted == other.clientStarted &&
+          fellBackToUrl == other.fellBackToUrl;
+}

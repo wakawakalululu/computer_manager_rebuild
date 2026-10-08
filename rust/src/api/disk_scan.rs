@@ -43,6 +43,10 @@ pub struct EntryResult {
     pub size: u64,
     /// 命中文件明细
     pub hits: Vec<FileHit>,
+    /// 规则的 LangSecRef 原值（如 3021/3401/3402/3403）。winapp2.rs 里
+    /// 解析了它却一直没往外送，深度清理列表因此只能按规则名分组，
+    /// 没法按"垃圾清理 / 系统无用文件 / 网络缓存"这类大类归类。
+    pub lang_sec_ref: String,
 }
 
 /// 深度清理整体扫描结果
@@ -97,6 +101,7 @@ pub fn scan_deep_clean() -> anyhow::Result<String> {
                     name: entry.name.clone(),
                     size,
                     hits,
+                    lang_sec_ref: entry.lang_sec_ref.clone(),
                 },
                 remove_dirs,
             )
@@ -179,7 +184,8 @@ pub fn get_recycle_bin_size() -> anyhow::Result<Vec<String>> {
     // walkdir C:\$Recycle.Bin 累加文件大小；各 SID 子目录可能拒绝访问，权限错误静默跳过。
     // 返回格式约定：[0] = 总字节数（十进制字符串），[1] = 人类可读大小（如 "1.23 GB"）。
     let mut total: u64 = 0;
-    for entry in WalkDir::new("C:\\$Recycle.Bin").follow_links(false) {
+    // 同上：回收站在**系统盘**上，写死 C: 会在装到别处的机器上读到别人的盘
+    for entry in WalkDir::new(system_root_dir().join("$Recycle.Bin")).follow_links(false) {
         let Ok(entry) = entry else { continue }; // 无权限子树静默跳过
         if !entry.file_type().is_file() {
             continue;
@@ -467,14 +473,31 @@ fn is_skipped_top_dir(name: &str) -> bool {
     SKIP_TOP_DIRS.iter().any(|s| lower == *s)
 }
 
+/// 系统盘根目录（带尾部分隔符，如 `C:\`）。
+///
+/// 回收站与系统盘扫描都依赖它。两处原先各自写死 `C:\`——装到 D:/E: 的机器上
+/// 会去扫一个**无关的卷**，"系统盘文件"那一页列的根本不是系统盘，回收站容量
+/// 也会读成别的盘的。读 %SystemDrive%（与 `get_root_disk_info` 同一口径，
+/// 不引入第二套规则），读不到才退回 `C:`。
+fn system_root_dir() -> PathBuf {
+    let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+    let mut p = PathBuf::from(drive.trim_end_matches(['\\', '/']));
+    p.push("\\");
+    p
+}
+
 // ---- original path: api::disk_scan::system_disk_scan::system_disk_scan ----
 pub fn system_disk_scan() -> anyhow::Result<String> {
     // frb codec: crateApiDiskScanSystemDiskScanRSystemDiskScan
     SYSTEM_DISK_SCAN_CANCEL.store(false, Ordering::SeqCst);
-    let root = PathBuf::from("C:\\");
+    // ⚠ 原来写死 `C:\`：**装到 D: 的机器会去扫一个无关的盘**（或干脆失败），
+    // 于是"系统盘文件"这一页列的根本不是系统盘。系统盘问 %SystemDrive%
+    // （与 get_root_disk_info 同一口径），问不到才退回 C:。
+    let root = system_root_dir();
 
     let mut stats: Vec<DirStat> = Vec::new();
-    let rd = fs::read_dir(&root).with_context(|| "无法读取 C:\\ 顶层目录")?;
+    let rd = fs::read_dir(&root)
+        .with_context(|| format!("无法读取 {} 顶层目录", root.display()))?;
     for e in rd {
         let Ok(e) = e else { continue };
         let Ok(ft) = e.file_type() else { continue };
@@ -513,6 +536,11 @@ pub fn cancel_system_disk_scan() -> anyhow::Result<()> {
 pub fn clear_system_disk_scan_data() -> anyhow::Result<()> {
     // frb codec: crateApiDiskScanSystemDiskScanRClearSystemDiskScanData
     // 本实现无持久缓存（每次扫描即算即传），仅需复位取消标志。
+    //
+    // ⚠ **故意不给出口**：`system_disk_scan()` 开头已经做了同一件事
+    // （`SYSTEM_DISK_SCAN_CANCEL.store(false, …)`），所以"下一次扫描"天然就是干净的。
+    // 再接一条 UI 动作去手动复位，等于让用户点一下才开始扫描前才需要的状态——
+    // 而且点了之后界面上没有任何变化（那本来就没有可清的数据），是个假 affordance。
     SYSTEM_DISK_SCAN_CANCEL.store(false, Ordering::SeqCst);
     Ok(())
 }
@@ -550,4 +578,46 @@ fn format_size(bytes: u64) -> String {
         u += 1;
     }
     format!("{:.2} {}", v, UNITS[u])
+}
+
+#[cfg(test)]
+mod system_root_tests {
+    /// 系统盘根目录必须跟着 **%SystemDrive%** 走，不能写死 `C:\`。
+    ///
+    /// 两处曾各自写死：系统盘扫描去 `read_dir("C:\")`、回收站去
+    /// `WalkDir::new("C:\$Recycle.Bin")`。装到 D:/E: 的机器上，那两处会去读一个
+    /// **无关的卷**——"系统盘文件"页列的根本不是系统盘，回收站容量也读成别的盘的。
+    /// 本机是 C:，所以这个 bug 在这里**看不出来**，只能靠断言把它钉住。
+    #[test]
+    fn system_root_follows_the_system_drive() {
+        let root = super::system_root_dir();
+        let expected_drive =
+            std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+        let expected = expected_drive.trim_end_matches(['\\', '/']);
+        let got = root.to_string_lossy().trim_end_matches('\\').to_string();
+        assert_eq!(
+            got, expected,
+            "系统盘根目录应跟着 %SystemDrive%={expected_drive:?}，实际 {root:?}"
+        );
+        // 必须是绝对路径且带尾部分隔符（拼子目录时省一次 join）
+        assert!(root.is_absolute(), "{root:?} 不是绝对路径");
+        assert!(root.to_string_lossy().ends_with('\\'), "{root:?} 缺尾部分隔符");
+    }
+
+    /// 回收站路径要建在**系统盘根**下面，而不是拼到 C: 上。
+    #[test]
+    fn recycle_bin_lives_under_the_system_root() {
+        let bin = super::system_root_dir().join("$Recycle.Bin");
+        let text = bin.to_string_lossy().to_string();
+        assert!(
+            text.contains("$Recycle.Bin"),
+            "回收站路径不对：{text}"
+        );
+        // 关键性质：前缀是系统盘根，不是写死的 C:\
+        let root = super::system_root_dir().to_string_lossy().to_string();
+        assert!(
+            text.starts_with(root.as_str()),
+            "回收站 {text:?} 不在系统盘根 {root:?} 下面"
+        );
+    }
 }

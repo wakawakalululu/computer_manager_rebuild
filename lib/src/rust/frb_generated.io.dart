@@ -43,6 +43,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DiskInfo dco_decode_box_autoadd_disk_info(dynamic raw);
 
   @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw);
+
+  @protected
+  ComponentProbe dco_decode_component_probe(dynamic raw);
+
+  @protected
   DiskInfo dco_decode_disk_info(dynamic raw);
 
   @protected
@@ -100,7 +106,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   NetQuality dco_decode_net_quality(dynamic raw);
 
   @protected
+  String? dco_decode_opt_String(dynamic raw);
+
+  @protected
   DiskInfo? dco_decode_opt_box_autoadd_disk_info(dynamic raw);
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
+
+  @protected
+  PcasLaunchOutcome dco_decode_pcas_launch_outcome(dynamic raw);
 
   @protected
   ProcessEntry dco_decode_process_entry(dynamic raw);
@@ -140,6 +155,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DiskInfo sse_decode_box_autoadd_disk_info(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  ComponentProbe sse_decode_component_probe(SseDeserializer deserializer);
 
   @protected
   DiskInfo sse_decode_disk_info(SseDeserializer deserializer);
@@ -202,7 +223,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   NetQuality sse_decode_net_quality(SseDeserializer deserializer);
 
   @protected
+  String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
   DiskInfo? sse_decode_opt_box_autoadd_disk_info(SseDeserializer deserializer);
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  PcasLaunchOutcome sse_decode_pcas_launch_outcome(
+      SseDeserializer deserializer);
 
   @protected
   ProcessEntry sse_decode_process_entry(SseDeserializer deserializer);
@@ -244,6 +275,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_disk_info(
       DiskInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_component_probe(
+      ComponentProbe self, SseSerializer serializer);
 
   @protected
   void sse_encode_disk_info(DiskInfo self, SseSerializer serializer);
@@ -311,8 +349,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_net_quality(NetQuality self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_disk_info(
       DiskInfo? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_pcas_launch_outcome(
+      PcasLaunchOutcome self, SseSerializer serializer);
 
   @protected
   void sse_encode_process_entry(ProcessEntry self, SseSerializer serializer);

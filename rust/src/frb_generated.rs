@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.9.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1839452368;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1470448338;
 
 // Section: executor
 
@@ -423,6 +423,40 @@ fn wire__crate__api__sysinfo__common_patch_install_impl(
                     (move || {
                         let output_ok =
                             crate::api::sysinfo::common_patch_install(api_package_path)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__sysinfo__component_probe_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "component_probe",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::sysinfo::component_probe()?;
                         Ok(output_ok)
                     })(),
                 )
@@ -1052,6 +1086,38 @@ fn wire__crate__api__sysinfo__get_app_info_impl(
                         Ok(output_ok)
                     })(),
                 )
+            }
+        },
+    )
+}
+fn wire__crate__api__sysinfo__get_boot_time_ms_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "get_boot_time_ms",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(crate::api::sysinfo::get_boot_time_ms())?;
+                    Ok(output_ok)
+                })())
             }
         },
     )
@@ -1945,6 +2011,40 @@ fn wire__crate__api__simple__init_app_impl(
         },
     )
 }
+fn wire__crate__api__gui_log__init_log_bridge_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "init_log_bridge",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::gui_log::init_log_bridge();
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__sysinfo__install_start_service_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2537,6 +2637,38 @@ fn wire__crate__api__sysinfo__open_setting_network_proxy_page_impl(
                         Ok(output_ok)
                     })(),
                 )
+            }
+        },
+    )
+}
+fn wire__crate__api__pcas__pcas_client_installed_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "pcas_client_installed",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(crate::api::pcas::pcas_client_installed())?;
+                    Ok(output_ok)
+                })())
             }
         },
     )
@@ -3576,6 +3708,7 @@ impl SseDecode for crate::api::sysinfo::AdapterInfo {
         let mut var_gateways = <Vec<String>>::sse_decode(deserializer);
         let mut var_dhcpEnabled = <bool>::sse_decode(deserializer);
         let mut var_dnsServers = <Vec<String>>::sse_decode(deserializer);
+        let mut var_netshName = <String>::sse_decode(deserializer);
         return crate::api::sysinfo::AdapterInfo {
             description: var_description,
             mac_address: var_macAddress,
@@ -3583,6 +3716,7 @@ impl SseDecode for crate::api::sysinfo::AdapterInfo {
             gateways: var_gateways,
             dhcp_enabled: var_dhcpEnabled,
             dns_servers: var_dnsServers,
+            netsh_name: var_netshName,
         };
     }
 }
@@ -3605,6 +3739,26 @@ impl SseDecode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_u8().unwrap() != 0
+    }
+}
+
+impl SseDecode for crate::api::sysinfo::ComponentProbe {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_printers = <Vec<String>>::sse_decode(deserializer);
+        let mut var_defaultPrinter = <Option<String>>::sse_decode(deserializer);
+        let mut var_offlinePrinters = <Vec<String>>::sse_decode(deserializer);
+        let mut var_problemDevices = <Vec<String>>::sse_decode(deserializer);
+        let mut var_problemDeviceCount = <u32>::sse_decode(deserializer);
+        let mut var_bootMode = <String>::sse_decode(deserializer);
+        return crate::api::sysinfo::ComponentProbe {
+            printers: var_printers,
+            default_printer: var_defaultPrinter,
+            offline_printers: var_offlinePrinters,
+            problem_devices: var_problemDevices,
+            problem_device_count: var_problemDeviceCount,
+            boot_mode: var_bootMode,
+        };
     }
 }
 
@@ -3658,6 +3812,7 @@ impl SseDecode for crate::api::sysinfo::InstalledAppInfo {
         let mut var_uninstallKey = <String>::sse_decode(deserializer);
         let mut var_uninstallString = <String>::sse_decode(deserializer);
         let mut var_displayIcon = <String>::sse_decode(deserializer);
+        let mut var_launchTarget = <Option<String>>::sse_decode(deserializer);
         return crate::api::sysinfo::InstalledAppInfo {
             name: var_name,
             version: var_version,
@@ -3665,6 +3820,7 @@ impl SseDecode for crate::api::sysinfo::InstalledAppInfo {
             uninstall_key: var_uninstallKey,
             uninstall_string: var_uninstallString,
             display_icon: var_displayIcon,
+            launch_target: var_launchTarget,
         };
     }
 }
@@ -3851,6 +4007,17 @@ impl SseDecode for crate::api::sysinfo::NetQuality {
     }
 }
 
+impl SseDecode for Option<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<String>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::sysinfo::DiskInfo> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3859,6 +4026,29 @@ impl SseDecode for Option<crate::api::sysinfo::DiskInfo> {
         } else {
             return None;
         }
+    }
+}
+
+impl SseDecode for Option<u64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<u64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for crate::api::pcas::PcasLaunchOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_clientStarted = <bool>::sse_decode(deserializer);
+        let mut var_fellBackToUrl = <bool>::sse_decode(deserializer);
+        return crate::api::pcas::PcasLaunchOutcome {
+            client_started: var_clientStarted,
+            fell_back_to_url: var_fellBackToUrl,
+        };
     }
 }
 
@@ -3980,182 +4170,186 @@ fn pde_ffi_dispatcher_primary_impl(
         11 => {
             wire__crate__api__sysinfo__common_patch_install_impl(port, ptr, rust_vec_len, data_len)
         }
-        12 => wire__crate__api__utils__create_mutex_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__utils__create_tmep_empty_file_whit_size_impl(
+        12 => wire__crate__api__sysinfo__component_probe_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__utils__create_mutex_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__utils__create_tmep_empty_file_whit_size_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        14 => wire__crate__api__disk_scan__delete_file_impl(port, ptr, rust_vec_len, data_len),
-        15 => {
+        15 => wire__crate__api__disk_scan__delete_file_impl(port, ptr, rust_vec_len, data_len),
+        16 => {
             wire__crate__api__disk_scan__delete_single_file_impl(port, ptr, rust_vec_len, data_len)
         }
-        16 => wire__crate__api__sysinfo__disable_proxy_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__sysinfo__dism_install_patch_impl(port, ptr, rust_vec_len, data_len),
-        18 => {
+        17 => wire__crate__api__sysinfo__disable_proxy_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__sysinfo__dism_install_patch_impl(port, ptr, rust_vec_len, data_len),
+        19 => {
             wire__crate__api__sysinfo__dism_uninstall_patch_impl(port, ptr, rust_vec_len, data_len)
         }
-        19 => {
+        20 => {
             wire__crate__api__disk_scan__duplicate_file_scan_impl(port, ptr, rust_vec_len, data_len)
         }
-        20 => {
+        21 => {
             wire__crate__api__disk_scan__empty_recycle_bin_impl(port, ptr, rust_vec_len, data_len)
         }
-        21 => wire__crate__api__sysinfo__enable_adapter_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__gui_log__error_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__sysinfo__exec_image_package_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__sysinfo__extract_app_icon_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__sysinfo__fix_host_configed_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__sysinfo__get_adapter_size_impl(port, ptr, rust_vec_len, data_len),
-        27 => {
+        22 => wire__crate__api__sysinfo__enable_adapter_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__gui_log__error_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__sysinfo__exec_image_package_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__sysinfo__extract_app_icon_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__sysinfo__fix_host_configed_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__sysinfo__get_adapter_size_impl(port, ptr, rust_vec_len, data_len),
+        28 => {
             wire__crate__api__sysinfo__get_adapterinfo_list_impl(port, ptr, rust_vec_len, data_len)
         }
-        28 => wire__crate__api__utils__get_app_current_dir_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__sysinfo__get_app_info_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__sysinfo__get_computer_type_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__sysinfo__get_cursor_pos_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__sysinfo__get_dhcp_and_dns_status_impl(
+        29 => wire__crate__api__utils__get_app_current_dir_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__sysinfo__get_app_info_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__sysinfo__get_boot_time_ms_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__sysinfo__get_computer_type_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__sysinfo__get_cursor_pos_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__sysinfo__get_dhcp_and_dns_status_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        33 => wire__crate__api__sysinfo__get_disk_info_list_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__sysinfo__get_image_version_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__sysinfo__get_installed_patch_ids_impl(
+        35 => wire__crate__api__sysinfo__get_disk_info_list_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__sysinfo__get_image_version_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__sysinfo__get_installed_patch_ids_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        36 => wire__crate__api__utils__get_machine_id_impl(port, ptr, rust_vec_len, data_len),
-        37 => {
+        38 => wire__crate__api__utils__get_machine_id_impl(port, ptr, rust_vec_len, data_len),
+        39 => {
             wire__crate__api__device_info__get_main_monitor_impl(port, ptr, rust_vec_len, data_len)
         }
-        38 => {
+        40 => {
             wire__crate__api__device_info__get_monitor_size_impl(port, ptr, rust_vec_len, data_len)
         }
-        39 => wire__crate__api__device_info__get_monitor_work_size_impl(
+        41 => wire__crate__api__device_info__get_monitor_work_size_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => wire__crate__api__sysinfo__get_name_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__sysinfo__get_net_info_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__sysinfo__get_process_file_description_impl(
+        42 => wire__crate__api__sysinfo__get_name_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__sysinfo__get_net_info_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__sysinfo__get_process_file_description_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => wire__crate__api__sysinfo__get_process_ico_impl(port, ptr, rust_vec_len, data_len),
-        44 => {
+        45 => wire__crate__api__sysinfo__get_process_ico_impl(port, ptr, rust_vec_len, data_len),
+        46 => {
             wire__crate__api__sysinfo__get_process_publisher_impl(port, ptr, rust_vec_len, data_len)
         }
-        45 => wire__crate__api__disk_scan__get_recycle_bin_size_impl(
+        47 => wire__crate__api__disk_scan__get_recycle_bin_size_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__sysinfo__get_root_disk_info_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__utils__get_rust_notify_msg_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__sysinfo__get_stroge_sense_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__sysinfo__get_system_boot_up_duration_impl(
+        48 => wire__crate__api__sysinfo__get_root_disk_info_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__utils__get_rust_notify_msg_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__sysinfo__get_stroge_sense_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__sysinfo__get_system_boot_up_duration_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        50 => wire__crate__api__sysinfo__get_version_info_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__sysinfo__get_win_detial_ver_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__sysinfo__has_manual_proxy_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__sysinfo__host_configed_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__gui_log__info_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__simple__init_app_impl(port, ptr, rust_vec_len, data_len),
-        56 => {
+        52 => wire__crate__api__sysinfo__get_version_info_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__sysinfo__get_win_detial_ver_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__sysinfo__has_manual_proxy_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__sysinfo__host_configed_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__gui_log__info_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__simple__init_app_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__gui_log__init_log_bridge_impl(port, ptr, rust_vec_len, data_len),
+        59 => {
             wire__crate__api__sysinfo__install_start_service_impl(port, ptr, rust_vec_len, data_len)
         }
-        57 => wire__crate__api__sysinfo__is_path_exits_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__sysinfo__is_x86_cpu_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__sysinfo__judge_version_impl(port, ptr, rust_vec_len, data_len),
-        60 => {
+        60 => wire__crate__api__sysinfo__is_path_exits_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__sysinfo__is_x86_cpu_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__sysinfo__judge_version_impl(port, ptr, rust_vec_len, data_len),
+        63 => {
             wire__crate__api__sysinfo__kill_restart_service_impl(port, ptr, rust_vec_len, data_len)
         }
-        61 => wire__crate__api__disk_scan__large_file_scan_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__sysinfo__log_process_port_usage_impl(
+        64 => wire__crate__api__disk_scan__large_file_scan_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__sysinfo__log_process_port_usage_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        63 => wire__crate__api__utils__main_collect_impl(port, ptr, rust_vec_len, data_len),
-        64 => {
+        66 => wire__crate__api__utils__main_collect_impl(port, ptr, rust_vec_len, data_len),
+        67 => {
             wire__crate__api__sysinfo__measure_net_quality_impl(port, ptr, rust_vec_len, data_len)
         }
-        65 => wire__crate__api__sysinfo__msi_patch_install_impl(port, ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__sysinfo__net_available_impl(port, ptr, rust_vec_len, data_len),
-        67 => wire__crate__api__sysinfo__notepad_open_host_impl(port, ptr, rust_vec_len, data_len),
-        68 => wire__crate__api__sysinfo__open_app_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__api__disk_scan__open_file_dir_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__api__pcas__open_pcas_client_impl(port, ptr, rust_vec_len, data_len),
-        71 => wire__crate__api__disk_scan__open_recycle_bin_folder_impl(
+        68 => wire__crate__api__sysinfo__msi_patch_install_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__sysinfo__net_available_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__sysinfo__notepad_open_host_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__api__sysinfo__open_app_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__api__disk_scan__open_file_dir_impl(port, ptr, rust_vec_len, data_len),
+        73 => wire__crate__api__pcas__open_pcas_client_impl(port, ptr, rust_vec_len, data_len),
+        74 => wire__crate__api__disk_scan__open_recycle_bin_folder_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        72 => wire__crate__api__sysinfo__open_setting_network_proxy_page_impl(
+        75 => wire__crate__api__sysinfo__open_setting_network_proxy_page_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        73 => wire__crate__api__sysinfo__processes_memory_optimization_impl(
+        76 => wire__crate__api__pcas__pcas_client_installed_impl(port, ptr, rust_vec_len, data_len),
+        77 => wire__crate__api__sysinfo__processes_memory_optimization_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        74 => wire__crate__api__utils__push_notify_impl(port, ptr, rust_vec_len, data_len),
-        75 => wire__crate__api__sysinfo__read_cup_info_impl(port, ptr, rust_vec_len, data_len),
-        76 => wire__crate__api__sysinfo__read_memory2_impl(port, ptr, rust_vec_len, data_len),
-        77 => wire__crate__api__sysinfo__read_process_info_impl(port, ptr, rust_vec_len, data_len),
-        78 => wire__crate__api__sysinfo__read_startup_list_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__api__sysinfo__reboot_pending_reasons_impl(
+        78 => wire__crate__api__utils__push_notify_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__api__sysinfo__read_cup_info_impl(port, ptr, rust_vec_len, data_len),
+        80 => wire__crate__api__sysinfo__read_memory2_impl(port, ptr, rust_vec_len, data_len),
+        81 => wire__crate__api__sysinfo__read_process_info_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__api__sysinfo__read_startup_list_impl(port, ptr, rust_vec_len, data_len),
+        83 => wire__crate__api__sysinfo__reboot_pending_reasons_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        80 => wire__crate__api__utils__restart_application2_impl(port, ptr, rust_vec_len, data_len),
-        81 => wire__crate__api__utils__rust_backend_clean_impl(port, ptr, rust_vec_len, data_len),
-        82 => wire__crate__api__utils__rust_backend_init_impl(port, ptr, rust_vec_len, data_len),
-        83 => wire__crate__api__disk_scan__scan_deep_clean_impl(port, ptr, rust_vec_len, data_len),
-        84 => wire__crate__api__sysinfo__service_status_impl(port, ptr, rust_vec_len, data_len),
-        85 => wire__crate__api__sysinfo__set_adapter_dhcp_impl(port, ptr, rust_vec_len, data_len),
-        86 => wire__crate__api__sysinfo__set_adapter_dns_impl(port, ptr, rust_vec_len, data_len),
-        87 => wire__crate__api__utils__set_env_impl(port, ptr, rust_vec_len, data_len),
-        88 => wire__crate__api__utils__set_is_dev_impl(port, ptr, rust_vec_len, data_len),
-        89 => wire__crate__api__sysinfo__set_network_fix_impl(port, ptr, rust_vec_len, data_len),
-        90 => wire__crate__api__sysinfo__set_os_info_impl(port, ptr, rust_vec_len, data_len),
-        91 => wire__crate__api__sysinfo__set_stroge_sense_impl(port, ptr, rust_vec_len, data_len),
-        92 => wire__crate__api__sysinfo__show_stroge_sense_impl(port, ptr, rust_vec_len, data_len),
-        93 => wire__crate__api__sysinfo__start_exe_impl(port, ptr, rust_vec_len, data_len),
-        94 => wire__crate__api__sysinfo__start_service_impl(port, ptr, rust_vec_len, data_len),
-        95 => wire__crate__api__disk_scan__system_disk_scan_impl(port, ptr, rust_vec_len, data_len),
-        96 => wire__crate__api__sysinfo__terminate_process_impl(port, ptr, rust_vec_len, data_len),
-        97 => wire__crate__api__sysinfo__uninstall_app_impl(port, ptr, rust_vec_len, data_len),
-        98 => {
+        84 => wire__crate__api__utils__restart_application2_impl(port, ptr, rust_vec_len, data_len),
+        85 => wire__crate__api__utils__rust_backend_clean_impl(port, ptr, rust_vec_len, data_len),
+        86 => wire__crate__api__utils__rust_backend_init_impl(port, ptr, rust_vec_len, data_len),
+        87 => wire__crate__api__disk_scan__scan_deep_clean_impl(port, ptr, rust_vec_len, data_len),
+        88 => wire__crate__api__sysinfo__service_status_impl(port, ptr, rust_vec_len, data_len),
+        89 => wire__crate__api__sysinfo__set_adapter_dhcp_impl(port, ptr, rust_vec_len, data_len),
+        90 => wire__crate__api__sysinfo__set_adapter_dns_impl(port, ptr, rust_vec_len, data_len),
+        91 => wire__crate__api__utils__set_env_impl(port, ptr, rust_vec_len, data_len),
+        92 => wire__crate__api__utils__set_is_dev_impl(port, ptr, rust_vec_len, data_len),
+        93 => wire__crate__api__sysinfo__set_network_fix_impl(port, ptr, rust_vec_len, data_len),
+        94 => wire__crate__api__sysinfo__set_os_info_impl(port, ptr, rust_vec_len, data_len),
+        95 => wire__crate__api__sysinfo__set_stroge_sense_impl(port, ptr, rust_vec_len, data_len),
+        96 => wire__crate__api__sysinfo__show_stroge_sense_impl(port, ptr, rust_vec_len, data_len),
+        97 => wire__crate__api__sysinfo__start_exe_impl(port, ptr, rust_vec_len, data_len),
+        98 => wire__crate__api__sysinfo__start_service_impl(port, ptr, rust_vec_len, data_len),
+        99 => wire__crate__api__disk_scan__system_disk_scan_impl(port, ptr, rust_vec_len, data_len),
+        100 => wire__crate__api__sysinfo__terminate_process_impl(port, ptr, rust_vec_len, data_len),
+        101 => wire__crate__api__sysinfo__uninstall_app_impl(port, ptr, rust_vec_len, data_len),
+        102 => {
             wire__crate__api__sysinfo__uninstall_app_moint_impl(port, ptr, rust_vec_len, data_len)
         }
-        99 => wire__crate__api__gui_log__warn_impl(port, ptr, rust_vec_len, data_len),
-        100 => {
+        103 => wire__crate__api__gui_log__warn_impl(port, ptr, rust_vec_len, data_len),
+        104 => {
             wire__crate__api__sysinfo__wusa_install_patch_impl(port, ptr, rust_vec_len, data_len)
         }
-        101 => {
+        105 => {
             wire__crate__api__sysinfo__wusa_uninstall_patch_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -4186,6 +4380,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::sysinfo::AdapterInfo {
             self.gateways.into_into_dart().into_dart(),
             self.dhcp_enabled.into_into_dart().into_dart(),
             self.dns_servers.into_into_dart().into_dart(),
+            self.netsh_name.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4224,6 +4419,31 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::sysinfo::AppIconPixels>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::sysinfo::ComponentProbe {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.printers.into_into_dart().into_dart(),
+            self.default_printer.into_into_dart().into_dart(),
+            self.offline_printers.into_into_dart().into_dart(),
+            self.problem_devices.into_into_dart().into_dart(),
+            self.problem_device_count.into_into_dart().into_dart(),
+            self.boot_mode.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::sysinfo::ComponentProbe
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::sysinfo::ComponentProbe>
+    for crate::api::sysinfo::ComponentProbe
+{
+    fn into_into_dart(self) -> crate::api::sysinfo::ComponentProbe {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::sysinfo::DiskInfo {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -4255,6 +4475,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::sysinfo::InstalledAppInfo {
             self.uninstall_key.into_into_dart().into_dart(),
             self.uninstall_string.into_into_dart().into_dart(),
             self.display_icon.into_into_dart().into_dart(),
+            self.launch_target.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4377,6 +4598,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::sysinfo::NetQuality>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::pcas::PcasLaunchOutcome {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.client_started.into_into_dart().into_dart(),
+            self.fell_back_to_url.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::pcas::PcasLaunchOutcome
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::pcas::PcasLaunchOutcome>
+    for crate::api::pcas::PcasLaunchOutcome
+{
+    fn into_into_dart(self) -> crate::api::pcas::PcasLaunchOutcome {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::sysinfo::ProcessEntry {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -4447,6 +4689,7 @@ impl SseEncode for crate::api::sysinfo::AdapterInfo {
         <Vec<String>>::sse_encode(self.gateways, serializer);
         <bool>::sse_encode(self.dhcp_enabled, serializer);
         <Vec<String>>::sse_encode(self.dns_servers, serializer);
+        <String>::sse_encode(self.netsh_name, serializer);
     }
 }
 
@@ -4463,6 +4706,18 @@ impl SseEncode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_u8(self as _).unwrap();
+    }
+}
+
+impl SseEncode for crate::api::sysinfo::ComponentProbe {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<String>>::sse_encode(self.printers, serializer);
+        <Option<String>>::sse_encode(self.default_printer, serializer);
+        <Vec<String>>::sse_encode(self.offline_printers, serializer);
+        <Vec<String>>::sse_encode(self.problem_devices, serializer);
+        <u32>::sse_encode(self.problem_device_count, serializer);
+        <String>::sse_encode(self.boot_mode, serializer);
     }
 }
 
@@ -4508,6 +4763,7 @@ impl SseEncode for crate::api::sysinfo::InstalledAppInfo {
         <String>::sse_encode(self.uninstall_key, serializer);
         <String>::sse_encode(self.uninstall_string, serializer);
         <String>::sse_encode(self.display_icon, serializer);
+        <Option<String>>::sse_encode(self.launch_target, serializer);
     }
 }
 
@@ -4645,6 +4901,16 @@ impl SseEncode for crate::api::sysinfo::NetQuality {
     }
 }
 
+impl SseEncode for Option<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <String>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::sysinfo::DiskInfo> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4652,6 +4918,24 @@ impl SseEncode for Option<crate::api::sysinfo::DiskInfo> {
         if let Some(value) = self {
             <crate::api::sysinfo::DiskInfo>::sse_encode(value, serializer);
         }
+    }
+}
+
+impl SseEncode for Option<u64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <u64>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for crate::api::pcas::PcasLaunchOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.client_started, serializer);
+        <bool>::sse_encode(self.fell_back_to_url, serializer);
     }
 }
 

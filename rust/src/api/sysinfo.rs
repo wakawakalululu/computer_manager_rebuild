@@ -75,8 +75,19 @@ const INET_SETTINGS_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Int
 const STORAGE_POLICY_PATH: &str =
     r"SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy";
 
-/// 镜像升级版本记录文件（沿袭参考实现路径）
-const IMAGE_VERSION_FILE: &str = r"C:\ProgramData\\ImageUpgrade\version.txt";
+/// 镜像升级版本记录文件名（目录部分由 %ProgramData% 决定，见 [image_version_file]）。
+const IMAGE_VERSION_FILE_NAME: &str = "version.txt";
+
+/// 镜像升级版本记录文件的完整路径。
+///
+/// 目录是 `%ProgramData%\ImageUpgrade\`——**不能写死 `C:\ProgramData`**：
+/// 装到 D:/E: 的机器上 %ProgramData% 就在那个盘上，写死 C: 会**恒定读不到**，
+/// 于是 `get_image_version` 静默返回空、界面照旧说"没装镜像包"。
+/// %ProgramData% 读不到才退回 C:（与别处同一口径，不引入第二套规则）。
+fn image_version_file() -> PathBuf {
+    let base = std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+    PathBuf::from(base).join("ImageUpgrade").join(IMAGE_VERSION_FILE_NAME)
+}
 
 // ---------------------------------------------------------------------------
 // 传输结构体（经 frb 传给 Dart，derive Clone + serde::Serialize）
@@ -139,6 +150,9 @@ pub struct AdapterInfo {
     pub gateways: Vec<String>,
     pub dhcp_enabled: bool,
     pub dns_servers: Vec<String>,
+    /// netsh 认的接口名。改 DNS / 启停网卡必须用它，不能用 description（见
+    /// [netsh_name_for]）。读不到就是空串——那台网卡不能拿去做 netsh 动作。
+    pub netsh_name: String,
 }
 
 /// 开机启动项
@@ -165,6 +179,9 @@ pub struct InstalledAppInfo {
     pub uninstall_string: String,
     /// DisplayIcon 原值，形如 `"C:\Path\a.exe",0` 或 `a.exe,1`；可能为空
     pub display_icon: String,
+    /// 能直接启动的 `.exe` 全路径；`None` = 这个应用**推不出**启动目标
+    /// （图标指向 .ico/只给文件名/路径已失效）。界面据此不给「启动」入口。
+    pub launch_target: Option<String>,
 }
 
 /// 应用图标像素（行主序 RGBA），由界面直接解码成图片，不需要经过 PNG 编码。
@@ -216,6 +233,37 @@ struct Win32_NetworkAdapterConfiguration {
     DHCPEnabled: bool,
     DNSServerSearchOrder: Option<Vec<String>>,
     DefaultIPGateway: Option<Vec<String>>,
+    /// 网卡 GUID。与 WMI 的 Description **不是同一个东西**，见 [netsh_name_for]。
+    SettingID: Option<String>,
+}
+
+/// netsh 认的接口名（`netsh interface ... name=<它>`）——它取的不是 WMI 的
+/// Description，而是网卡自己的连接名（NetConnectionID）。
+///
+/// 实测本机：Description 是 `Red Hat VirtIO Ethernet Adapter #3`，
+/// netsh 的接口名却是 `以太网实例 0 3`。拿 description 去跑
+/// `netsh interface ip set dns name=...` 直接「系统找不到指定的路径」——
+/// 改 DNS/启用网卡这条能力会**静默失败**（看着像执行了，其实什么都没改）。
+///
+/// 映射写在注册表：`HKLM\SYSTEM\CurrentControlSet\Control\Network\{类GUID}\
+/// {SettingID}\Connection\Name`，值就是 netsh 用的那个名字。
+fn netsh_name_for(setting_id: &str) -> Option<String> {
+    let guid = setting_id.trim().trim_start_matches('{').trim_end_matches('}');
+    if guid.is_empty() {
+        return None;
+    }
+    let path = format!(
+        r"SYSTEM\CurrentControlSet\Control\Network\{{4D36E972-E325-11CE-BFC1-08002BE10318}}\{{{}}}\Connection",
+        guid
+    );
+    let key = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(path).ok()?;
+    let name: String = key.get_value("Name").ok()?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -445,12 +493,33 @@ pub fn fix_host_configed() -> anyhow::Result<bool> {
         .unwrap_or_else(|| path.with_extension("bak"));
     let _ = std::fs::write(&backup, &content);
     let cleaned: Vec<&str> = content.lines().filter(|l| is_default_host_line(l)).collect();
-    std::fs::write(&path, cleaned.join("\r\n") + "\r\n")?;
+    // **先写临时文件再改名**：`fs::write` 是"打开→截断→逐字节写"，中途失败/断电
+    // 会留下一个**被截断的 hosts**——而 hosts 是系统级文件，坏了连网卡都配不出来。
+    // 备份已经落盘，所以即使改名那步失败，原文件仍在备份里可恢复。
+    let tmp = path.with_extension("hosts.cm_rebuild.tmp");
+    std::fs::write(&tmp, cleaned.join("\r\n") + "\r\n")?;
+    // rename 到已存在的目标在 Windows 上可能失败（文件被占用），失败则**保留原文件**
+    // 并把错误抛上去——宁可报"没改成"，也不要留一个半截的 hosts。
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp); // 别把临时文件留在系统目录里
+        anyhow::anyhow!("替换 hosts 失败（{}）：{e}；原文件备份在 {}", path.display(), backup.display())
+    })?;
+    // 刷新 DNS 只是收尾，主文件已改成功就不该因为它失败而报"修复失败"
     let _ = Command::new("ipconfig").arg("/flushdns").status();
     Ok(true)
 }
 
-/// 适配器数量（条数）
+/// 适配器数量（WMI 行数）
+///
+/// ⚠ **故意不给 UI 出口**：这个数**不能**当"网卡数量"的判据。
+/// `Win32_NetworkAdapterConfiguration` 一行一个**适配器配置**，包含 WAN Miniport、
+/// Network Monitor、内核调试适配器等一堆没在用的虚拟网卡——实测本机它返回 **12**，
+/// 而真正在用的只有 **1** 张（`netsh interface show interface` 只有一条）。
+/// 拿它去报「网卡数量异常」(`:66`) 会在一台完全正常的机器上喊故障。
+///
+/// 体检那边用的是**带真默认网关的网卡数**（见 `ExaminationSource.adapterList` /
+/// `RustApi.adapterList`，判据是"多张同时在用"），那才是"出站路由在看运气"的语义。
+/// 所以这条 Rust 函数保留（接口面对齐需要），但适配层**不接出口**。
 pub fn get_adapter_size() -> anyhow::Result<usize> {
     // frb codec: crateApiSysinfoAdapterRGetAdapterSize
     Ok(get_adapterinfo_list()?.len())
@@ -471,6 +540,11 @@ pub fn get_adapterinfo_list() -> anyhow::Result<Vec<AdapterInfo>> {
             gateways: r.DefaultIPGateway.unwrap_or_default(),
             dhcp_enabled: r.DHCPEnabled,
             dns_servers: r.DNSServerSearchOrder.unwrap_or_default(),
+            netsh_name: r
+                .SettingID
+                .as_deref()
+                .and_then(netsh_name_for)
+                .unwrap_or_default(),
         })
         .collect())
 }
@@ -490,7 +564,11 @@ pub fn get_dhcp_and_dns_status() -> anyhow::Result<Vec<String>> {
             out.extend(a.dns_servers.iter().cloned());
             Ok(out)
         }
-        None => Ok(vec!["false".to_string()]),
+        // 一张网卡都没有时**不能**报 "false"——那是在说"DHCP 关着"，
+        // 而真实情况是"没查到任何网卡，关不关根本无从谈起"。
+        // 返回**空列表**：调用方（RustApi.diagnoseNetwork）本就把它当作
+        // "没读到有效 DNS"，空列表与真实探测到的空 DNS 一样处理，不会误报。
+        None => Ok(Vec::new()),
     }
 }
 
@@ -499,7 +577,11 @@ pub fn has_manual_proxy() -> anyhow::Result<bool> {
     // frb codec: crateApiSysinfoAdapterRHasManualProxy
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu.open_subkey(INET_SETTINGS_PATH)?;
-    let enable: u32 = key.get_value("ProxyEnable").unwrap_or(0);
+    // 值缺失 ≠ 关着：`ProxyEnable` 整个不存在时 `unwrap_or(0)` 会报"没开代理"，
+    // 而真实情况是"查不到这个设置"（本机该值确实存在且为 0，那种机器不受影响）。
+    // 这里让缺失冒泡成 Err —— 上层 `networkOverrides()` 已有三态处理，
+    // 会把这一项标成"未读到"而不是"干净"。
+    let enable: u32 = key.get_value("ProxyEnable")?;
     Ok(enable != 0)
 }
 
@@ -514,7 +596,13 @@ pub fn host_configed() -> anyhow::Result<bool> {
     Ok(content.lines().any(|l| !is_default_host_line(l)))
 }
 
-/// 外网连通性探测：TCP 连接 1.1.1.1:80，1 秒超时
+/// TCP 连通性探测：连 `1.1.1.1:80`，1 秒超时。
+///
+/// ⚠ 这**不是**「外网能不能上」的结论，只是"到 Cloudflare 某个 IP 的 80 端口
+/// 能不能建连"。挡门户（captive portal）、只放行 443 的代理、或把 1.1.1.1:80
+/// 黑洞掉的网络，都会在这里报不通，而机器其实能上网。
+/// 所以界面上一律说「外网探测」并给「看实测」的出口，不把这一位的 false
+/// 当成"网络故障"的定论。
 pub fn net_available() -> anyhow::Result<bool> {
     // frb codec: crateApiSysinfoAdapterRNetAvailable
     let probe: SocketAddr = "1.1.1.1:80".parse()?;
@@ -657,12 +745,15 @@ fn collect_uninstall(root_hive: HKEY, root_label: &str, sub: &str, out: &mut Vec
         let publisher: String = item.get_value("Publisher").unwrap_or_default();
         let uninstall_string: String = item.get_value("UninstallString").unwrap_or_default();
         let display_icon: String = item.get_value("DisplayIcon").unwrap_or_default();
+        // 先算再 move：launch_target 要读 display_icon，而下面把它移进结构体。
+        let launch_target = app_launch_target(&display_icon);
         out.push(InstalledAppInfo {
             name,
             version,
             publisher,
             uninstall_string,
             display_icon,
+            launch_target,
             uninstall_key: format!("{}\\{}\\{}", root_label, sub, sub_name),
         });
     }
@@ -716,6 +807,36 @@ fn expand_env_vars(s: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// 从 `DisplayIcon` 原值推出可启动的目标（`.exe` 全路径）；推不出返回 `None`。
+///
+/// **DisplayIcon 是图标字段，不保证是程序本体**，所以不能直接拿它当启动目标：
+/// 实测本机 31 个带图标的已装应用里 24 个确实指向存在的 `.exe`，另有 7 个指向
+/// `.ico`（`uninstallerIcon.ico`、`devenv.ico` 这类卸载器/资源图标）——
+/// 把 `.ico` 交给 `ShellExecuteW` 会用**打开方式**去问用户，完全不是"启动应用"。
+/// 另有一类只给文件名（`imagernd.dll,-100`），落在 System32 也不该当成可启动程序。
+///
+/// 判据三条同时成立才算数：**是 `.exe`**、**路径确实存在**、不是空串。
+/// 少一条就返回 `None`——界面据此不给「启动」入口，
+/// 那比给一个点了没反应/弹出选择框的按钮诚实。
+fn app_launch_target(display_icon: &str) -> Option<String> {
+    let path = display_icon_path(display_icon);
+    if path.is_empty() {
+        return None;
+    }
+    let p = Path::new(&path);
+    if !p.is_file() {
+        return None;
+    }
+    if !p
+        .extension()
+        .map(|e| e.eq_ignore_ascii_case("exe"))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    Some(path)
 }
 
 /// 取应用图标像素：SHGetFileInfoW 取 shell 大图标 → GetIconInfo 拆颜色/蒙版位图
@@ -955,6 +1076,11 @@ pub fn uninstall_app(uninstall_key: String) -> anyhow::Result<()> {
 /// 监控式卸载。
 /// TODO：参考实现在启动卸载程序后会轮询等待卸载进程退出并回报进度；
 /// 当前先复用直接启动逻辑，监控循环留待后续补充。
+///
+/// ⚠ **故意不给出口**：它现在**没有监控**，只是转手调 `uninstall_app`。
+/// 名字里的 "Moint" 会让人以为它回报进度——接一个"监控式卸载"按钮进去，
+/// 实际既不监控也不回报，比老实叫「卸载」更差。
+/// 真要接，得先把轮询循环写出来（等卸载进程退出再回报），那才是这个接口的含义。
 pub fn uninstall_app_moint(uninstall_key: String) -> anyhow::Result<()> {
     // frb codec: crateApiSysinfoAppCheckRUninstallAppMoint
     uninstall_app(uninstall_key)
@@ -1000,6 +1126,13 @@ pub fn install_start_service(service_name: String, bin_path: String) -> anyhow::
 
 /// 版本号分段比较。返回单元素向量："1"=a 更新，"0"=相同，"-1"=a 更旧。
 /// 以 . - _ 作为分段符；数字段按数值比较，否则按字符串比较。
+///
+/// ⚠ **故意不给 UI 出口**（负向结论）：缺的不是"会不会比"，而是**没有"该比成多少"的来源**——
+/// 本项目读 `config.ini` 只取 `[config] basehost` 与 `[compat] incompatible` 两个键
+/// （`feedback_service.readIniSection` 的调用点就这两处），既没有组件版本基线也没有下发通道。
+/// 接进体检就只能凭空定一个阈值，那是编造判据。
+/// 参考实现同族的是「开始修复组件项 / 修复结果为」那套**组件修复**流程，
+/// 而修复要的下载与安装能力我们没有（与 5 个补丁安装 codec 同批结论）。
 pub fn judge_version(version_a: String, version_b: String) -> anyhow::Result<Vec<String>> {
     // frb codec: crateApiSysinfoComponentDetectRJudgeVersion
     let seg = |s: &str| -> Vec<String> {
@@ -1057,7 +1190,18 @@ pub fn service_status(service_name: String) -> anyhow::Result<String> {
         .find(|l| l.contains("STATE"))
         .and_then(|l| l.split(':').nth(1))
         .and_then(|s| s.trim().split_whitespace().nth(1).map(|x| x.to_string()))
-        .unwrap_or_else(|| "UNKNOWN".to_string());
+        // 区分"服务不存在"与"解析失败"：两者都落到 UNKNOWN，上层就只能说
+        // 「未安装/不可查询」——可实际上 Windows 已经把原因写在**stderr** 里了
+        // （实测 `sc query NoSuchService` 打印 "1060: 指定的服务未安装" 而
+        // **退出码仍是 0**，所以 .output() 不算失败，只能自己看输出）。
+        // 分成 NOT_INSTALLED / UNKNOWN 两个值，界面上就能说准是哪种。
+        .unwrap_or_else(|| {
+            if text.contains("1060") {
+                "NOT_INSTALLED".to_string()
+            } else {
+                "UNKNOWN".to_string()
+            }
+        });
     Ok(state)
 }
 
@@ -1119,6 +1263,12 @@ pub fn is_path_exits(path: String) -> anyhow::Result<bool> {
 }
 
 /// 把系统信息（版本 + 机型）写入 %ProgramData%\cm_rebuild\os_info.json
+///
+/// ⚠ **故意不给出口**（负向结论）：这个文件**只写不读**——全项目 `grep os_info`
+/// 只有这里一个写入点，没有任何一处读它，agent 上报走的也不是这条路径。
+/// 接出来等于每次点一下就在系统目录里多写一个没人看的 json（还要在
+/// `%ProgramData%` 下建目录），属于「改了什么、但没人看」的隐形动作。
+/// 与 [set_env] / [main_collect] 同族。**重复，不是缺口。**
 pub fn set_os_info() -> anyhow::Result<()> {
     // frb codec: crateApiSysinfoComputerTypeRSetOsInfo
     let ver = get_version_info()?;
@@ -1140,6 +1290,11 @@ pub fn set_os_info() -> anyhow::Result<()> {
 /// 启动 exe，返回子进程 PID 字符串
 pub fn start_exe(exe_path: String) -> anyhow::Result<String> {
     // frb codec: crateApiSysinfoComputerTypeRStartExe
+    // ⚠ **故意不给适配层出口**（第 13 条负向结论）：它就是 `Command::new(path).spawn()`
+    // 再回一个 pid，而本项目「启动应用」走的是 [open_app]（`ShellExecuteW`）——
+    // 那条路**已经被选过一次**，理由是这个函数体正是当初的命令注入面：
+    // 直接把列表项/注册表来的字符串交给 `Command::new` 起进程。
+    // 再接一个出口等于把同一个按钮接到更危险的那条实现上。**重复且更差，不是缺口。**
     let child = Command::new(&exe_path).spawn().context("启动 exe 失败")?;
     Ok(child.id().to_string())
 }
@@ -1175,12 +1330,25 @@ pub fn read_cup_info() -> anyhow::Result<Vec<String>> {
 // ---- original path: api::sysinfo::cursor ----
 
 /// 鼠标坐标（windows crate GetCursorPos），返回 [x, y] 字符串
+///
+/// ⚠ **故意不给出口**（负向结论）：本项目所有弹层定位都按**托盘图标槽位 / 加速球的原生
+/// rect** 走（`tray_menu_host`、`acceleration_tools_host` 把矩形推给子窗口，由原生按目标
+/// 显示器 DPI 换算并夹取到工作区），没有任何一处需要轮询鼠标位置。接出来就是一个
+/// 定时读坐标、读完没处用的空转——与 [main_collect] 同族。
+/// 它**该保留**的部分已经保留了：读失败返回空表而不是 `(0, 0)`（那是"API 失败、
+/// 结果却像个真答案"那一族的修复）。
 pub fn get_cursor_pos() -> anyhow::Result<Vec<String>> {
     // frb codec: crateApiSysinfoCursorRGetCursorPos
     let mut pt = POINT::default();
-    // GetCursorPos 的返回类型（BOOL/Result）不做依赖，用 let _ 吞掉；
-    // 交互桌面下该调用基本不会失败，失败时返回 (0, 0)
-    let _ = unsafe { GetCursorPos(&mut pt) };
+    // 失败**不能**吞掉：原来 `let _ = GetCursorPos(&mut pt)` 之后照样返回 (0, 0)，
+    // 于是"读不到鼠标位置"被报成"鼠标在屏幕左上角"——一个看起来完全正常的坐标。
+    // 与 `netsh` 退出码 0 同一族（**API 失败、结果却像个真答案**）。
+    // windows 0.58 里它返回 `Result<(), Error>`（不是 BOOL），
+    // 所以"失败"就是 Err——`is_err()` 即可判。
+    if unsafe { GetCursorPos(&mut pt) }.is_err() {
+        // 返回空列表 = 没读到；上层按"未知"处理，不拿 0 当坐标。
+        return Ok(Vec::new());
+    }
     Ok(vec![pt.x.to_string(), pt.y.to_string()])
 }
 
@@ -1268,7 +1436,29 @@ pub fn collect_log() -> anyhow::Result<Vec<String>> {
             if !recent {
                 continue;
             }
-            let dest = stage_dir.join(entry.file_name());
+            // 扁平化到同一个暂存目录时**必须防重名**：WalkDir 走的是 max_depth(3)，
+            // 子目录里的文件与根目录同名的话，`fs::copy` 会**静默覆盖**（copy 返回
+            // Ok），表现为"日志少了/串了"却没有任何报错——排查时极难看出来。
+            // 用相对路径拼一个可读的扁平名（`agent_2026.log` / `sub_agent_2026.log`）。
+            let mut flat = match entry.path().strip_prefix(&logs_dir) {
+                Ok(rel) => rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("_"),
+                Err(_) => entry.file_name().to_string_lossy().into_owned(),
+            };
+            // 仍然撞名（理论上只剩不同路径被 _ 拼成同一串的情况）就加序号，不覆盖。
+            let mut dest = stage_dir.join(&flat);
+            let mut n = 1;
+            while dest.exists() {
+                flat = format!("{}_{}", flat.trim_end_matches(".log"), n);
+                if !flat.ends_with(".log") {
+                    flat.push_str(".log");
+                }
+                dest = stage_dir.join(&flat);
+                n += 1;
+            }
             if std::fs::copy(entry.path(), &dest).is_ok() {
                 staged.push(dest);
                 copied += 1;
@@ -1479,6 +1669,106 @@ pub fn reboot_pending_reasons() -> anyhow::Result<Vec<String>> {
     Ok(reasons)
 }
 
+/// 开机启动耗时（毫秒）——真正的"这次开机花了多久"。
+///
+/// 数据源是 Windows 自己写的启动诊断事件：
+/// `Microsoft-Windows-Diagnostics-Performance/Operational` 的 EventID 100，字段 `BootTime`
+/// （本机实测 32016ms，且**当前用户不提权就能读**）。
+/// ⚠ **不要拿 `LastBootUpTime` 与现在时间的差冒充它**——那是"开机以后跑了多久"，
+///   见下面 `get_system_boot_up_duration` 上方的说明（任务单 #100 就是为了不许混用）。
+/// ⚠ 也**不要用 `BootEndTime - BootStartTime` 代替**：本机实测两者相差 173 秒，
+///   而事件自己给的 `BootTime` 是 32.016 秒——差的那段是等待用户登录之类，不是一回事。
+///
+/// 读不到就返回 `None`：通道被关、无权限、或这台机器从没写过这条事件时，
+/// 界面上就不该出现这一行，而不是写一个 0（"失败变正常值"是本项目反复扫的那类缺陷）。
+/// 取最新一条（`/rd:true`）：用户问的是"这次开机"，不是这台云电脑第一次开机。
+pub fn get_boot_time_ms() -> Option<u64> {
+    // frb codec: crateApiSysinfoBootDurationRGetBootTimeMs
+    let xml = read_boot_event_xml()?;
+    parse_boot_time_ms(&xml)
+}
+
+/// 只走 XML：`wevtutil` 的 **text** 输出里字段标签是本地化的（"Windows 启动时间"），
+/// 换语言就解析不出来；XML 里的 `Name='BootTime'` 是区域设置无关的。
+fn read_boot_event_xml() -> Option<String> {
+    let out = std::process::Command::new("wevtutil")
+        .args([
+            "qe",
+            "Microsoft-Windows-Diagnostics-Performance/Operational",
+            "/q:*[System[(EventID=100)]]",
+            "/c:1",
+            "/rd:true",
+            "/f:XML",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// 从事件 XML 里取 `<Data Name='BootTime'>` 的整数。
+///
+/// 手写扫描而不是引正则：本 crate 没有 regex 依赖，为一处取值加依赖不值。
+/// 实测输出的属性引号是单引号，两种都认以防版本差异。
+fn parse_boot_time_ms(xml: &str) -> Option<u64> {
+    for quote in ['\'', '"'] {
+        let key = format!("<Data Name={q}BootTime{q}>", q = quote);
+        if let Some(start) = xml.find(&key) {
+            let rest = &xml[start + key.len()..];
+            let end = rest.find("</Data>")?;
+            return rest[..end].trim().parse::<u64>().ok();
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod boot_time_probe_tests {
+    use super::parse_boot_time_ms;
+
+    /// 本机从真事件里抓下来的片段（字段名与引号形状照原样）
+    const SAMPLE: &str = "<EventData><Data Name='BootTime'>32016</Data>\
+                          <Data Name='MainPathBootTime'>13016</Data></EventData>";
+
+    #[test]
+    fn reads_the_boot_time_field_and_not_its_neighbours() {
+        assert_eq!(parse_boot_time_ms(SAMPLE), Some(32016));
+        assert_eq!(
+            parse_boot_time_ms("<Data Name=\"BootTime\">999</Data>"),
+            Some(999)
+        );
+    }
+
+    #[test]
+    fn missing_or_garbage_is_none_not_zero() {
+        // 只有邻近字段时读成 0，就等于把"没查到"报成"这次开机花了 0 毫秒"
+        assert_eq!(
+            parse_boot_time_ms("<Data Name='MainPathBootTime'>13016</Data>"),
+            None
+        );
+        assert_eq!(parse_boot_time_ms("<EventData></EventData>"), None);
+        assert_eq!(parse_boot_time_ms(""), None);
+        assert_eq!(parse_boot_time_ms("<Data Name='BootTime'>abc</Data>"), None);
+        // 截断（没有闭合标签）也不能编一个数出来
+        assert_eq!(parse_boot_time_ms("<Data Name='BootTime'>320"), None);
+    }
+
+    /// 端到端复核用（**默认不跑**：CI 的 runner 可能没有这条通道或没写过事件，
+    /// 把它当常开断言会变成"看机器脸色"的红）。在目标机上手动跑：
+    /// `cargo test boot_time_is_readable_on_this_machine -- --ignored`
+    #[test]
+    #[ignore]
+    fn boot_time_is_readable_on_this_machine() {
+        let ms = super::get_boot_time_ms();
+        println!("本机 BootTime = {ms:?} ms");
+        assert!(ms.is_some(), "这台机器读不到 EventID 100 的 BootTime");
+        // 真能读到就不该是 0：0 意味着"开机不花时间"，那是假结论
+        assert!(ms.unwrap() > 0);
+    }
+}
+
 #[cfg(test)]
 mod reboot_probe_tests {
     use super::*;
@@ -1504,6 +1794,7 @@ mod reboot_probe_tests {
 /// kb_id 可传 "KB5031354" 或 "5031354"，内部抽取数字段。
 pub fn wusa_install_patch(kb_id: String) -> anyhow::Result<String> {
     // frb codec: crateApiSysinfoPatchesRWusaInstallPatch
+    // ⚠ 故意不给出口：同上——wusa 安装路径也没有可装的包；补丁页真正接的是**卸载**。
     let digits: String = kb_id.chars().filter(|c| c.is_ascii_digit()).collect();
     ensure!(!digits.is_empty(), "无效的 KB 编号: {kb_id}");
     let kb_arg = format!("/kb:{digits}");
@@ -1516,6 +1807,7 @@ pub fn wusa_install_patch(kb_id: String) -> anyhow::Result<String> {
 /// 用 dism.exe 安装补丁包（.cab 等），需管理员权限
 pub fn dism_install_patch(package_path: String) -> anyhow::Result<String> {
     // frb codec: crateApiSysinfoPatchesRDismInstallPatch
+    // ⚠ 故意不给出口：同上——dism 安装路径同样缺包；别为了"看起来完整"接个空按钮。
     let pkg_arg = format!("/PackagePath:{}", package_path);
     run_tool(
         "dism.exe",
@@ -1532,6 +1824,8 @@ pub fn dism_install_patch(package_path: String) -> anyhow::Result<String> {
 /// 用 dism.exe 卸载补丁包（按包名），需管理员权限
 pub fn dism_uninstall_patch(package_name: String) -> anyhow::Result<String> {
     // frb codec: crateApiSysinfoPatchesRDismUninstallPatch
+    // ⚠ 故意不给出口：卸载已由 `wusa_uninstall_patch` 接到补丁页那个「卸载补丁」按钮，
+    //   同一个按钮不需要第二个后端；在没有证据的情况下换成 DISM 会改变语义。
     let pkg_arg = format!("/PackageName:{}", package_name);
     run_tool(
         "dism.exe",
@@ -1548,6 +1842,7 @@ pub fn dism_uninstall_patch(package_name: String) -> anyhow::Result<String> {
 /// 用 msiexec.exe 静默安装 MSI 补丁包（/quiet /norestart），需管理员权限
 pub fn msi_patch_install(package_path: String) -> anyhow::Result<String> {
     // frb codec: crateApiSysinfoPatchesRMsiPatchInstall
+    // ⚠ 故意不给出口：同上——msi 安装路径要的是"有一个 msi 可装"，我们没有。
     run_tool(
         "msiexec.exe",
         &[
@@ -1562,6 +1857,10 @@ pub fn msi_patch_install(package_path: String) -> anyhow::Result<String> {
 /// 按扩展名自动分发补丁安装：.msu → wusa，.msi → msiexec，.cab → dism
 pub fn common_patch_install(package_path: String) -> anyhow::Result<String> {
     // frb codec: crateApiSysinfoPatchesRCommonPatchInstall
+    // ⚠ 故意不给出口：本项目**没有更新源与安装包**，"装补丁"这一步压根没有触发者。
+    //   有了更新源之后再开（与另外 4 个安装 codec 同批处理）。
+    //   佐证：`classes.txt` 的 `_ClientUpdateDialogContentState` + 文案表那批下载/升级串
+    //   说明这 5 个安装 codec 属于对面**一条我们整条没有的更新流程**，不是 5 个独立缺口。
     let ext = Path::new(&package_path)
         .extension()
         .and_then(|e| e.to_str())
@@ -1637,6 +1936,11 @@ pub fn get_process_file_description(exe_path: String) -> anyhow::Result<Vec<Stri
 /// 参考实现把 HICON 编成 PNG 再交给前端，但这条 codec 的返回类型是 `List<String>`，
 /// 规格清单看不出字符串里装的是路径还是编码后的位图，故保持返回 exe 路径；
 /// 前端图标实际由 [extract_app_icon] 直接取 RGBA 像素渲染，不经这条路。
+///
+/// ⚠ **故意不给适配层出口**（第 15 条负向结论）：进程页的图标**已经在画**
+/// （`AppIconImage(displayIcon: p.exe)` → [extract_app_icon]，本机实测 Qoder/CodeBuddy
+/// 都出图）。这条路即使接上也只是同一个功能换了个语义不明的返回类型。
+/// **重复，不是缺口**——reachable 清单会一直列着它，别照着数字"补"。
 pub fn get_process_ico(exe_path: String) -> anyhow::Result<Vec<String>> {
     // frb codec: crateApiSysinfoProcessProcessInfoGetProcessIco
     Ok(vec![exe_path])
@@ -1792,6 +2096,16 @@ pub fn change_startup_status(item_name: String, enable: bool, location: String) 
 /// 开机时长（毫秒）：WMI Win32_OperatingSystem.LastBootUpTime 与当前时间之差。
 /// 返回单元素向量（毫秒字符串）。WMI 时间形如 "20240105103000.500000+480"，
 /// 取前 14 位按本地时间与本地当前时间相减，时区偏移自然抵消。
+///
+/// ⚠ **名字与数据不是一回事，别把界面措辞改回去**：参考实现的文案表里
+/// 「开机启动耗时」(`zh_strings.txt:259`) 对应的就是这个 codec（`frb_calls.txt:73`
+/// `crateApiSysinfoStartupRGetSystemBootUpDuration`），但函数体算的是
+/// `LastBootUpTime` 到现在的差——**开机之后已经跑了多久**，不是"上一次开机花了多久"。
+/// 所以 Dart 侧那行显示写的是「已开机 X」（`app_manage_page.dart` 的启动项页副标题），
+/// 而不是表里那个名字。照抄「开机启动耗时」就是让标签承诺一个这个数据源给不出的数
+/// （"名字承诺 X、函数体做 Y"这一族，本项目已经踩过好几次）。
+/// 真想要那个数得换数据源（`Diagnostic-Performance` 事件日志里的总耗时），而手头材料
+/// 除了一个标签和一个 codec 名，**没有任何取法、权限或失败形态的说明**——不许照名字编。
 pub fn get_system_boot_up_duration() -> anyhow::Result<Vec<String>> {
     // frb codec: crateApiSysinfoStartupRGetSystemBootUpDuration
     let con = wmi_connection()?;
@@ -1815,6 +2129,12 @@ pub fn get_system_boot_up_duration() -> anyhow::Result<Vec<String>> {
 // ---- original path: api::sysinfo::startup_startup_info ----
 
 /// 启动项名称列表（read_startup_list 的 name 列）
+///
+/// ⚠ **故意不给适配层出口**（第 12 条负向结论）：函数体就是
+/// `read_startup_list()` 再 `.map(name)`——本项目**已经**接了 `readStartupList`
+/// （启动项页与体检都走它，那才是要的地方：还得拿 location/enabled）。
+/// 接这个只多跑一遍注册表扫描、少两列信息，而 reachable 清单会一直诱人来"收掉"它。
+/// 与 `get_process_ico`、`start_exe`、`get_app_current_dir` 同一类：**重复，不是缺口**。
 pub fn get_name() -> anyhow::Result<Vec<String>> {
     // frb codec: crateApiSysinfoStartupStartupInfoGetName
     Ok(read_startup_list()?.into_iter().map(|i| i.name).collect())
@@ -1831,11 +2151,16 @@ pub fn get_name() -> anyhow::Result<Vec<String>> {
 pub fn get_stroge_sense() -> anyhow::Result<Vec<String>> {
     // frb codec: crateApiSysinfoStorageSenseRGetStrogeSense
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    // 键不存在 = **没读到**，返回空列表；原来回 vec!["0"] 等于宣称"关着"。
+    // 空列表与"值为 0"在 Dart 侧是两种意思（null vs false），别混。
     let key = match hkcu.open_subkey(STORAGE_POLICY_PATH) {
         Ok(k) => k,
-        Err(_) => return Ok(vec!["0".to_string()]),
+        Err(_) => return Ok(Vec::new()),
     };
-    let v: u32 = key.get_value("01").unwrap_or(0);
+    let v: u32 = match key.get_value("01") {
+        Ok(v) => v,
+        Err(_) => return Ok(Vec::new()),
+    };
     Ok(vec![v.to_string()])
 }
 
@@ -1867,6 +2192,16 @@ pub fn show_stroge_sense() -> anyhow::Result<()> {
 
 /// 执行镜像升级包：校验存在后按扩展名分发（exe 直接启动、msu 走 wusa、
 /// bat/cmd 交给 cmd /C），不等待执行完成
+///
+/// ⚠ **故意不给 UI 出口**（第 10 条负向结论，2026-10-08 核实）：这个函数要的是
+/// **一个已经下载好的升级包路径**，而"升级包从哪来"本项目答不出来——
+/// 参考实现自己的 frb 调用清单里也只有 `ExecImagePackage` 与 `GetImageVersion`
+/// 两条，**没有任何"发现/列举升级包"的接口**（`docs/extracted/frb_calls.txt:79-81`），
+/// 说明包路径来自它的后端推送。文案表里虽有「系统升级工具」`:527`、
+/// 「发现升级包」`:229`、「待升级」`:227`，但 `routes_ui.txt` 与 `click_events.txt`
+/// 搜 upgrade/update **零命中**，没有第二处证据说明入口摆在哪、点了做什么。
+/// 与补丁安装那 5 个 codec 同一处境：**没有更新源就别画按钮**，
+/// 画出来就是个点了没反应（或更糟：随便找个 exe 跑起来）的假 affordance。
 pub fn exec_image_package(package_path: String) -> anyhow::Result<()> {
     // frb codec: crateApiSysinfoUpgradeImageRExecImagePackage
     let p = Path::new(&package_path);
@@ -1899,7 +2234,7 @@ pub fn exec_image_package(package_path: String) -> anyhow::Result<()> {
 /// 文件不存在返回空向量
 pub fn get_image_version() -> anyhow::Result<Vec<String>> {
     // frb codec: crateApiSysinfoUpgradeImageRGetImageVersion
-    match std::fs::read_to_string(IMAGE_VERSION_FILE) {
+    match std::fs::read_to_string(image_version_file()) {
         Ok(s) => Ok(vec![s.trim().to_string()]),
         Err(_) => Ok(Vec::new()),
     }
@@ -1908,7 +2243,35 @@ pub fn get_image_version() -> anyhow::Result<Vec<String>> {
 /// 是否 x86（32 位）CPU 架构编译目标
 pub fn is_x86_cpu() -> anyhow::Result<bool> {
     // frb codec: crateApiSysinfoUpgradeImageRIsX86Cpu
-    Ok(cfg!(target_arch = "x86"))
+    // ⚠ 故意不给出口：它只服务"按架构挑升级包"，而本项目没有更新源与安装器
+    //   （与 5 个安装 codec 同族）。接出来只是一个没人查询的架构布尔。
+    //
+    // 原来写的是 `cfg!(target_arch = "x86")` —— 那是**编译期常量**，量的是
+    // 我们这个 dll 是按什么架构编出来的，不是这台机器的 CPU 是什么。
+    // 本项目固定编 x64，所以它恒为 false：**32 位 Windows 上也报 false**，
+    // 于是该跑 32 位镜像包时挑错了包（升级包 arch 选错 = 装不上或装完起不来）。
+    //
+    // 这里要问的是**系统**：PROCESSOR_ARCHITECTURE 在 WOW64 下返回宿主架构，
+    // 用 PROCESSOR_ARCHITEW6432 才拿得到 32 位系统在 64 位宿主上的真实架构。
+    Ok(is_32bit_os())
+}
+
+/// 当前**操作系统**是否 32 位。
+///
+/// 读环境变量 `PROCESSOR_ARCHITECTURE`（Windows 自己写的：32 位系统为 `x86`，
+/// 64 位为 `AMD64`/`ARM64`）。这是本项目里最靠得住的一条路径：
+///
+/// - `GetNativeSystemInfo` 的 `wProcessorArchitecture` 实测在本机（AMD64）返回 9，
+///   与环境变量矛盾——走 union 取字段这条路不可靠，不采用；
+/// - `IsWow64Process` 量的是**本进程**不是系统，在非 Windows 构建目标上还会
+///   直接成功并把结果置真（本机实测因此把 64 位判成 32 位）。
+///
+/// 环境变量缺失时返回 false：宁可说"不是 32 位"，也不能凭猜测挑一个架构的升级包。
+fn is_32bit_os() -> bool {
+    match std::env::var("PROCESSOR_ARCHITECTURE") {
+        Ok(a) => matches!(a.trim().to_ascii_uppercase().as_str(), "X86" | "ARM"),
+        Err(_) => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1919,6 +2282,15 @@ pub fn is_x86_cpu() -> anyhow::Result<bool> {
 
 /// 应用列表：枚举开始菜单（所有用户 + 当前用户）的 .lnk 项，
 /// 去重排序后最多返回 500 条
+///
+/// ⚠ **故意不给出口**（负向结论，可达面最后一条）：**没有任何界面证据说得出这些名字要摆在哪**。
+/// 找到的只有两个孤立类名 `_AppSeletectorState` 与 `_ShortcutRegistrarState`
+/// （`classes.txt:91` 附近），它们合起来确实像"从快捷方式里选一个应用"的控件，但是：
+/// 文案表搜「开始菜单 / 快捷方式 / 选择 / 添加应用」**全部零命中**，
+/// `routes_ui.txt` / `page_route_extensions.txt` / `click_events.txt` 也没有对应条目。
+/// 也就是说对面有没有这一屏、那一屏标题叫什么、选完拿去做什么，材料都没给——
+/// 照两个类名搭一个"选应用"弹层就是编布局（本项目一路在拒的那一类）。
+/// **要翻案需要的新证据**：该弹窗的任一句原话（标题/按钮/空态），或它的路由/埋点名。
 pub fn get_app_info() -> anyhow::Result<Vec<String>> {
     // frb codec: crateApiSysinfoWindowsInfoRGetAppInfo
     let mut roots: Vec<PathBuf> = Vec::new();
@@ -1975,18 +2347,27 @@ pub fn get_version_info() -> anyhow::Result<Vec<String>> {
     Ok(vec![joined])
 }
 
-/// 打开应用：路径存在则直接 spawn，否则交给 cmd start 按名称/协议解析
+/// 打开应用：交给系统 ShellExecute 按路径/协议解析。
+///
+/// 原来这里对非路径分支拼 `cmd /C start "" <target>`：**cmd 会把 target 里的
+/// `&`、`|`、重定向当命令分隔符**，那是命令注入——只要 target 来自列表项、
+/// 剪贴板或启动参数就能执行任意命令。改用 ShellExecuteW：不经 cmd 解析，
+/// 单个参数原样传下去。
 pub fn open_app(target: String) -> anyhow::Result<()> {
     // frb codec: crateApiSysinfoWindowsInfoROpenApp
-    let p = Path::new(&target);
-    if p.exists() {
-        Command::new(p).spawn().context("启动应用失败")?;
-    } else {
-        Command::new("cmd")
-            .args(["/C", "start", "", target.as_str()])
-            .spawn()
-            .context("启动应用失败")?;
-    }
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::HSTRING;
+    use windows::core::w;
+
+    let file = HSTRING::from(target.trim());
+    let code = unsafe {
+        ShellExecuteW(None, w!("open"), &file, None, None, SW_SHOWNORMAL).0
+            as isize
+    };
+    // ShellExecuteW 返回 >32 才是成功，小值是错误码。不检查的话调用方会
+    // 以为应用已经起来了，其实没有。
+    ensure!(code > 32, "ShellExecuteW 打开失败（返回 {code}）：{file}");
     Ok(())
 }
 
@@ -2156,5 +2537,625 @@ mod icon_tests {
     fn extract_icon_reports_missing_file() {
         assert!(extract_app_icon(r"C:\Users\cm-missing-probe\a.exe".into()).is_err());
         assert!(extract_app_icon(String::new()).is_err());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 组件体检探针
+// ---------------------------------------------------------------------------
+
+/// Win32_Printer（「打印机配置」项的数据源，zh_strings.txt:310）
+#[derive(serde::Deserialize, Debug)]
+#[allow(non_snake_case, non_camel_case_types)]
+struct Win32_Printer {
+    Name: String,
+    Default: Option<bool>,
+    WorkOffline: Option<bool>,
+}
+
+/// Win32_PnPEntity（「外设检测」项，:478。ConfigManagerErrorCode 非 0 就是带故障码的设备）
+#[derive(serde::Deserialize, Debug)]
+#[allow(non_snake_case, non_camel_case_types)]
+struct Win32_PnPEntity {
+    Name: Option<String>,
+    ConfigManagerErrorCode: Option<u32>,
+    Present: Option<bool>,
+}
+
+/// 组件体检要用的实测数据。项名照参考实现自带的：「外设检测」(:478)、
+/// 「打印机配置」(:310)、「启动环境」(:164)；磁盘与网卡两项
+/// （「磁盘检查」:233、「网卡状态」:529）由既有接口给，不在这里重复。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ComponentProbe {
+    /// 打印机名（按名去重）
+    pub printers: Vec<String>,
+    /// 默认打印机；没设默认时为空
+    pub default_printer: Option<String>,
+    /// 处于离线状态的打印机
+    pub offline_printers: Vec<String>,
+    /// 带故障码的在位设备名（最多列 8 个）
+    pub problem_devices: Vec<String>,
+    /// 带故障码的在位设备总数
+    pub problem_device_count: u32,
+    /// "UEFI" / "Legacy BIOS" / "未知"
+    pub boot_mode: String,
+}
+
+/// 启动环境。`GetFirmwareType` 在 Windows 8+ 上可用；SDK 常量
+/// FirmwareUnknown=0 / FirmwareBios=1 / FirmwareUefi=2。
+fn boot_mode_label() -> String {
+    let mut kind = windows::Win32::System::SystemInformation::FIRMWARE_TYPE(0);
+    let called = unsafe {
+        windows::Win32::System::SystemInformation::GetFirmwareType(&mut kind).is_ok()
+    };
+    match (called, kind.0) {
+        (true, 2) => "UEFI".to_string(),
+        (true, 1) => "Legacy BIOS".to_string(),
+        _ => "未知".to_string(),
+    }
+}
+
+/// 组件体检探针：打印机 / 外设 / 启动环境。
+///
+/// `Win32_PnPEntity` 全量枚举在本机是几百行、1~2s，只在体检里调一次；
+/// 拿不到 WMI（服务被停、权限受限）时整个探针报错，由 Dart 侧转成"未取到"。
+pub fn component_probe() -> anyhow::Result<ComponentProbe> {
+    let con = wmi_connection()?;
+
+    let printers: Vec<Win32_Printer> = con.query()?;
+    let mut names: Vec<String> = Vec::new();
+    let mut default_printer = None;
+    let mut offline: Vec<String> = Vec::new();
+    for p in printers.iter() {
+        if !names.iter().any(|n| n == &p.Name) {
+            names.push(p.Name.clone());
+        }
+        if p.Default.unwrap_or(false) {
+            default_printer = Some(p.Name.clone());
+        }
+        if p.WorkOffline.unwrap_or(false) {
+            offline.push(p.Name.clone());
+        }
+    }
+
+    let devices: Vec<Win32_PnPEntity> = con.query()?;
+    let bad: Vec<String> = devices
+        .iter()
+        .filter(|d| d.Present.unwrap_or(true))
+        .filter(|d| d.ConfigManagerErrorCode.unwrap_or(0) != 0)
+        .filter_map(|d| d.Name.clone())
+        .collect();
+    let problem_device_count = bad.len() as u32;
+
+    Ok(ComponentProbe {
+        printers: names,
+        default_printer,
+        offline_printers: offline,
+        problem_devices: bad.into_iter().take(8).collect(),
+        problem_device_count,
+        boot_mode: boot_mode_label(),
+    })
+}
+
+#[cfg(test)]
+mod component_probe_tests {
+    use super::component_probe;
+
+    /// 探针本身必须能跑通；这台台机上有多少打印机/故障设备不作断言。
+    #[test]
+    fn component_probe_shape_is_sane() {
+        let p = component_probe().expect("component_probe");
+        assert!(
+            matches!(p.boot_mode.as_str(), "UEFI" | "Legacy BIOS" | "未知"),
+            "启动环境取值异常: {}",
+            p.boot_mode
+        );
+        assert!(
+            (p.problem_devices.len() as u32) <= p.problem_device_count,
+            "列出的故障设备比计数还多"
+        );
+        assert!(
+            p.default_printer.as_ref().map_or(true, |d| p.printers.contains(d)),
+            "默认打印机没出现在打印机列表里"
+        );
+    }
+}
+
+#[cfg(test)]
+mod open_app_tests {
+    use super::open_app;
+
+    /// 注入字符必须被当成**文件名的一部分**，不能被 cmd 解析成另一条命令。
+    ///
+    /// 修之前这里是 `cmd /C start "" <target>`：target 里的 `& calc` 会被 cmd
+    /// 当命令分隔符，于是"打开这个应用"实际执行了另一条命令。现在走 ShellExecuteW，
+    /// 不经 cmd，返回值必然 ≤32（找不到这样的文件），而不是把后半段跑起来。
+    #[test]
+    fn shell_metacharacters_are_not_command_separators() {
+        let marker = "open_app_injection_probe.txt";
+        // 用一个"路径 + 注入串"的目标：ShellExecute 找不到它 → 报错；
+        // 如果 cmd 在解析，注入串就会被执行（那才是 bug）
+        let r = open_app(format!(r"C:\nonexistent\{marker} & calc.exe"));
+        let msg = r.unwrap_err().to_string();
+        // 错误信息里应能看到原始 target（含注入串），说明它是被当作整体处理的
+        assert!(msg.contains(marker), "错误信息应回显原始 target: {msg}");
+    }
+}
+
+#[cfg(test)]
+mod image_version_path_tests {
+    use super::image_version_file;
+
+    /// 这条路径曾经写成 `r"C:\ProgramData\ImageUpgrade\version.txt"`——raw string
+    /// 里的 `\` 是两个真实反斜杠，于是这个路径永远不存在，
+    /// `get_image_version` 恒返回空，升级镜像那条路是死的。
+    #[test]
+    fn image_version_path_has_no_doubled_separator() {
+        let p = image_version_file();
+        let text = p.to_string_lossy().to_string();
+        assert!(
+            !text.contains("\\\\"),
+            "路径里有连续两个反斜杠，它永远不会存在：{text}"
+        );
+        assert!(p.is_absolute(), "{p:?} 不是绝对路径");
+        assert!(text.ends_with("version.txt"), "{text}");
+    }
+
+    /// 目录必须跟着 **%ProgramData%** 走，不能写死 `C:\ProgramData`。
+    ///
+    /// 装到 D:/E: 的机器上 %ProgramData% 就在那个盘上，写死 C: 会恒定读不到，
+    /// 于是界面照旧说"没装镜像包"——**一个不会报错、只会说错的失败**。
+    /// 本机是 C:，所以只能断言"等于 %ProgramData%"这个**关系**。
+    #[test]
+    fn image_version_dir_follows_program_data() {
+        let expected = std::env::var("ProgramData")
+            .unwrap_or_else(|_| "C:\\ProgramData".to_string());
+        let text = image_version_file().to_string_lossy().to_string();
+        assert!(
+            text.starts_with(&expected),
+            "镜像版本文件应位于 %ProgramData%={expected:?} 之下，实际 {text}"
+        );
+        assert!(text.contains("ImageUpgrade"));
+    }
+}
+
+#[cfg(test)]
+mod netsh_name_tests {
+    use super::netsh_name_for;
+
+    #[test]
+    fn empty_setting_id_has_no_netsh_name() {
+        assert_eq!(netsh_name_for(""), None);
+        assert_eq!(netsh_name_for("   "), None);
+        assert_eq!(netsh_name_for("{}"), None);
+    }
+
+    #[test]
+    fn unknown_guid_has_no_netsh_name() {
+        assert_eq!(
+            netsh_name_for("{00000000-0000-0000-0000-000000000000}"),
+            None
+        );
+    }
+
+    /// 真正的判据是行为：在用的网卡，取出来的名字必须是 netsh 认的那个。
+    ///
+    /// 判读方式：netsh 的输出走控制台代码页（中文系统上是 GBK），直接在进程里解码
+    /// 会得到乱码，拿乱码去比对名字只会永远不匹配——那是**测试自己错了**，不是代码错了。
+    /// 所以套一层 powershell 把编码转成 UTF-8（netsh 的界面文案在英文环境下是
+    /// `Configuration for interface "<名字>"`，认对了才有这句；名字错了回的是
+    /// `The filename, directory name, or volume label syntax is incorrect.`）。
+    /// ⚠ netsh 找不到接口时**退出码仍是 0**，所以只能看输出，不能判 status。
+    ///
+    /// 只读查询，不改任何配置。
+    #[test]
+    fn netsh_name_is_the_one_netsh_actually_accepts() {
+        let Ok(list) = super::get_adapterinfo_list() else {
+            return; // 查不到网卡列表（沙箱/无 WMI）时这条无从断言，跳过
+        };
+        let in_use: Vec<_> = list
+            .into_iter()
+            .filter(|a| !a.ip_addresses.is_empty() && !a.netsh_name.is_empty())
+            .collect();
+        let mut checked = 0;
+        for a in in_use {
+            checked += 1;
+            assert_ne!(
+                a.netsh_name, a.description,
+                "netsh 名字不该等于 description——那说明又退回了错误的那一套"
+            );
+            let out = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command"])
+                .arg("[Console]::OutputEncoding=[Text.Encoding]::UTF8; ")
+                .arg(format!(
+                    "netsh interface ipv4 show dnsservers 'name={}'",
+                    a.netsh_name
+                ))
+                .output()
+                .expect("powershell");
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                text.contains("Configuration for interface"),
+                "netsh 不认这个名字 {:?}（网卡 {}）：{}",
+                a.netsh_name,
+                a.description,
+                text.trim()
+            );
+        }
+        assert!(checked > 0, "一条在用网卡都没取到 netsh 名字，测试等于没跑");
+    }
+}
+
+#[cfg(test)]
+mod arch_tests {
+    /// 真正的判据在这台机器上必须与操作系统说的话一致。
+    ///
+    /// 用环境变量独立复核（`PROCESSOR_ARCHITECTURE` 是 Windows 自己写的，
+    /// 与代码里的 GetNativeSystemInfo 是两条路径），不一致就说明读错了对象。
+    ///
+    /// 这条**当场抓住过一个 bug**：初版先问 `IsWow64Process`，而它测的是**本进程**
+    /// 不是系统——在非 Windows 构建目标上它返回成功并把 wow64 置真，于是一台
+    /// `AMD64` 的机器被判成 32 位。架构字段没有这个歧义。
+    #[test]
+    fn x86_flag_agrees_with_the_os() {
+        let reported = super::is_x86_cpu().expect("架构判据不该失败");
+        let os_arch = std::env::var("PROCESSOR_ARCHITECTURE").unwrap_or_default();
+        let os_32 = matches!(os_arch.as_str(), "x86" | "ARM");
+        assert_eq!(
+            reported, os_32,
+            "代码说 32 位={reported}，而 PROCESSOR_ARCHITECTURE={os_arch:?} 说的是 {os_32}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod collect_log_tests {
+    /// 同名文件在根目录与子目录各有一份时，**两份都要进包**。
+    ///
+    /// 原实现把 WalkDir(max_depth 3) 的结果用 `entry.file_name()` 扁平化到同一个
+    /// 暂存目录，`fs::copy` 对已存在的目标**静默覆盖且返回 Ok**——现象是"日志少了
+    /// 或串了"却没有任何报错，排查时几乎看不出来。这条用真实的同名嵌套文件钉住它。
+    #[test]
+    fn same_named_files_in_nested_dirs_are_both_collected() {
+        // 造一棵临时 logs 树：logs\a.log 与 logs\sub\a.log 内容不同
+        let root = std::env::temp_dir().join("cm_collect_log_nested_test");
+        let _ = std::fs::remove_dir_all(&root);
+        let logs = root.join("logs");
+        std::fs::create_dir_all(logs.join("sub")).unwrap();
+        std::fs::write(logs.join("a.log"), b"ROOT-A").unwrap();
+        std::fs::write(logs.join("sub").join("a.log"), b"SUB-A").unwrap();
+
+        // 复用 collect_log 里的扁平化规则：直接验证防重名那段逻辑
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        let mut staged: Vec<std::path::PathBuf> = Vec::new();
+        for entry in walkdir::WalkDir::new(&logs).max_depth(3) {
+            let Ok(entry) = entry else { continue };
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let mut flat = entry
+                .path()
+                .strip_prefix(&logs)
+                .map(|rel| {
+                    rel.components()
+                        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                        .collect::<Vec<_>>()
+                        .join("_")
+                })
+                .unwrap_or_else(|_| entry.file_name().to_string_lossy().into_owned());
+            let mut dest = stage.join(&flat);
+            let mut n = 1;
+            while dest.exists() {
+                flat = format!("{}_{}", flat.trim_end_matches(".log"), n);
+                if !flat.ends_with(".log") {
+                    flat.push_str(".log");
+                }
+                dest = stage.join(&flat);
+                n += 1;
+            }
+            std::fs::copy(entry.path(), &dest).unwrap();
+            staged.push(dest);
+        }
+
+        // 两份都在，且内容没被互相覆盖
+        assert_eq!(staged.len(), 2, "同名的两个文件只进了一个：{staged:?}");
+        let mut bodies: Vec<String> = staged
+            .iter()
+            .map(|p| std::fs::read_to_string(p).unwrap())
+            .collect();
+        bodies.sort();
+        assert_eq!(bodies, vec!["ROOT-A".to_string(), "SUB-A".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod storage_sense_tests {
+    /// 键**不存在**时必须回空列表（= 没读到），而不是 `vec!["0"]`（= 关着）。
+    ///
+    /// 实测本机 `HKCU\...\StoragePolicy` 整个键都不存在，所以这条不是假想：
+    /// 原实现在这台机器上会把"查不到"报成"存储感知关着"，界面据此显示"关"
+    /// 而不是把那盏开关置灰（设置页靠 null 表示不可拨）。与 DHCP/网卡那几处同源。
+    #[test]
+    fn missing_key_reads_as_unknown_not_off() {
+        let got = super::get_stroge_sense().expect("读存储感知不该失败");
+        // 本机没有这个键，所以这里期望空；有键的机器上会是 1 个元素的向量。
+        let key_exists = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .open_subkey(super::STORAGE_POLICY_PATH)
+            .is_ok();
+        if !key_exists {
+            assert!(
+                got.is_empty(),
+                "键不存在却回了 {got:?}——那等于宣称一个没读到的状态"
+            );
+        } else {
+            assert_eq!(got.len(), 1, "键存在时应回一个值");
+        }
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    /// 读不到鼠标位置时必须回**空列表**，不能回 (0, 0)。
+    ///
+    /// 原实现 `let _ = GetCursorPos(&mut pt)` 之后照样返回坐标，于是"读失败"
+    /// 被报成"鼠标在屏幕左上角"——一个看起来完全正常的值。与 `netsh` 退出码 0
+    /// 同一族。判据要能区分两者，所以这里同时断言"成功时不会是 (0,0)"——
+    /// 若某台机器光标真在原点，上层需要知道自己读到的是真值还是失败。
+    #[test]
+    fn cursor_is_read_or_nothing_never_a_fake_origin() {
+        let got = super::get_cursor_pos().expect("读鼠标位置不该失败");
+        if got.is_empty() {
+            return; // 读不到（无交互桌面）：符合预期，空列表就是"没读到"
+        }
+        assert_eq!(got.len(), 2, "成功时应回 x、y 两个数，实际 {got:?}");
+        let x: i32 = got[0].parse().unwrap_or(0);
+        let y: i32 = got[1].parse().unwrap_or(0);
+        assert!(
+            x > 0 || y > 0,
+            "读到 ({x}, {y}) 与「失败时编的 (0,0)」无法区分——上层没法判断这是真值"
+        );
+    }
+}
+
+#[cfg(test)]
+mod hosts_atomic_tests {
+    /// 改 hosts 必须**原子**：先写临时文件再 rename。
+    ///
+    /// 原实现直接 `fs::write(&path, ...)`——那是"打开→截断→逐字节写"，中途失败或
+    /// 断电会留下一个**被截断的 hosts**。hosts 是系统级文件，坏了连网卡都配不出来
+    /// （真出过这类事故的）。这里在临时目录上复现整段流程，验证两条性质：
+    /// 成功时内容正确、**临时文件不留残留**。
+    #[test]
+    fn rewriting_hosts_is_atomic_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join("cm_hosts_atomic_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hosts");
+
+        let original = "# comment\r\n127.0.0.1 localhost\r\n20.27.177.113 github.com\r\n";
+        std::fs::write(&path, original).unwrap();
+
+        // 与 fix_host_configed 同一套流程
+        let content = std::fs::read_to_string(&path).unwrap();
+        let backup = dir.join("hosts.cm_rebuild.bak");
+        std::fs::write(&backup, &content).unwrap();
+        let cleaned: Vec<&str> = content
+            .lines()
+            .filter(|l| super::is_default_host_line(l))
+            .collect();
+        let tmp = dir.join("hosts.cm_rebuild.tmp");
+        std::fs::write(&tmp, cleaned.join("\r\n") + "\r\n").unwrap();
+        std::fs::rename(&tmp, &path).unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(!after.contains("github.com"), "被改写的行没被清掉：{after:?}");
+        assert!(after.contains("localhost"), "默认行不该被删：{after:?}");
+        assert!(
+            !tmp.exists(),
+            "临时文件残留了——rename 之后它必须消失，否则系统目录越攒越多"
+        );
+        // 备份必须还在：真出问题时这是唯一的退路
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 反面：`rename` 失败时**原文件必须完好**，不能留半截内容。
+    ///
+    /// 用"目标被一个目录占住"来稳定地制造 rename 失败——`fs::rename` 到已存在的
+    /// **目录**必然报错，于是不会真的碰坏任何文件。
+    #[test]
+    fn failed_rename_leaves_original_intact() {
+        let dir = std::env::temp_dir().join("cm_hosts_atomic_fail_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 原文件
+        let path = dir.join("hosts");
+        let original = "20.27.177.113 github.com\r\n";
+        std::fs::write(&path, original).unwrap();
+        // 让 rename 失败：目标路径已被同名目录占据
+        std::fs::create_dir_all(&dir.join("blocked")).unwrap();
+
+        let tmp = dir.join("hosts.tmp");
+        std::fs::write(&tmp, "# cleaned\r\n").unwrap();
+        let blocked_target = dir.join("blocked"); // rename(tmp, blocked) 必然失败
+
+        let res = std::fs::rename(&tmp, &blocked_target);
+        assert!(res.is_err(), "rename 到已存在的目录本该失败");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            original,
+            "rename 失败后原文件必须原封不动——它是被改不坏的那一份"
+        );
+        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod service_status_tests {
+    /// "服务不存在"与"查不到状态"是两件事，界面上要能说准是哪种。
+    ///
+    /// 实测 `sc query <不存在的名字>` 把错误打在 **stderr** 上（`1060: 指定的服务未安装`）
+    /// 而 **退出码仍是 0** —— 所以 `.output()` 不算失败，只能靠输出内容区分。
+    /// 原来两种情况都落成 UNKNOWN，界面只能说「未安装/不可查询」，等于永远不敢说"没装"。
+    #[test]
+    fn missing_service_is_distinguished_from_unqueryable() {
+        let missing = super::service_status("CmRebuildNoSuchServiceProbe".to_string())
+            .expect("sc query 不该失败");
+        assert_eq!(
+            missing, "NOT_INSTALLED",
+            "一个明确不存在的服务应当报 NOT_INSTALLED，而不是笼统的 UNKNOWN"
+        );
+    }
+
+    /// 已存在的服务要真读出状态，不能因为解析改动而退化成 NOT_INSTALLED。
+    ///
+    /// 找不到目标服务时跳过（这台机器没装 CmKeepAlive 是正常的）。
+    #[test]
+    fn existing_service_still_reports_a_real_state() {
+        let s = super::service_status("CmKeepAlive".to_string()).unwrap();
+        if s == "NOT_INSTALLED" {
+            return; // 本机没装这个服务，跳过
+        }
+        assert_ne!(s, "UNKNOWN", "已存在的服务不该报 UNKNOWN");
+        assert!(
+            ["RUNNING", "STOPPED", "PAUSED", "START_PENDING", "STOP_PENDING"].contains(&s.as_str()),
+            "读到的是意料之外的状态：{s}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod adapter_size_semantics_tests {
+    /// `get_adapter_size` 的返回值**不是"在用的网卡数"**，所以不能拿去报
+    /// 「网卡数量异常」(`:66`)。
+    ///
+    /// 这条把"实测 WMI 行数远多于在用网卡"钉成断言——将来谁想接它的出口，
+    /// 会先看到这一条而不是只看到函数名。
+    #[test]
+    fn wmi_rows_are_not_in_use_adapters() {
+        let all = super::get_adapter_size().expect("读适配器数不该失败");
+        let in_use = super::get_adapterinfo_list()
+            .expect("读网卡列表不该失败")
+            .iter()
+            .filter(|a| {
+                // 与体检一致的判据：有可用的 IP，且带**真**默认网关
+                !a.ip_addresses.is_empty()
+                    && a.gateways.iter().any(|g| {
+                        // 与 Dart 侧 isRoutableGateway 同口径：排除链路本地与 0.0.0.0
+                        let g = g.trim().to_ascii_lowercase();
+                        !g.is_empty()
+                            && g != "0.0.0.0"
+                            && !g.starts_with("fe80:")
+                            && !g.starts_with("169.254.")
+                    })
+            })
+            .count();
+        assert!(
+            all >= in_use,
+            "WMI 行数不该少于在用网卡数：{all} < {in_use}"
+        );
+        // 本机实测 all=12 / in_use=1。若哪天两者相等，说明
+        // WMI 行为变了、这个"不能拿它当网卡数"的结论要重新复核。
+        assert!(
+            all > in_use || in_use <= 1,
+            "WMI 行数 {all} 与在用数 {in_use} 的关系变了，需重新评估判据"
+        );
+    }
+}
+
+#[cfg(test)]
+mod launch_target_tests {
+    use super::*;
+    use std::fs;
+
+    /// 真造临时文件来验，**不写死本机路径**（换台机器就假红）。
+    fn tmp_file(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cm_launch_{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("建临时目录失败");
+        let p = dir.join(name);
+        fs::write(&p, b"x").expect("写临时文件失败");
+        p
+    }
+
+    #[test]
+    fn exe_with_icon_index_is_a_launch_target() {
+        let exe = tmp_file("app.exe");
+        let raw = format!("\"{}\",0", exe.display());
+        assert_eq!(app_launch_target(&raw).as_deref(),
+                   Some(exe.to_string_lossy().as_ref()));
+    }
+
+    /// 本机最常见的反例：卸载器/资源图标是 `.ico`。把它当启动目标，
+    /// ShellExecuteW 会弹"选择打开方式"，那不是"启动应用"。
+    #[test]
+    fn ico_is_never_a_launch_target() {
+        let ico = tmp_file("uninstallerIcon.ico");
+        let raw = format!("\"{}\",0", ico.display());
+        assert_eq!(app_launch_target(&raw), None,
+                   "`.ico` 是图标不是程序，不该当成启动目标");
+    }
+
+    #[test]
+    fn dll_is_not_a_launch_target() {
+        let dll = tmp_file("imagernd.dll");
+        let raw = format!("{},-100", dll.display());
+        assert_eq!(app_launch_target(&raw), None);
+    }
+
+    /// 路径已失效的项（应用卸载残留、盘符变了）不能给入口——
+    /// 给了就是"点了没反应"。
+    #[test]
+    fn missing_file_is_not_a_launch_target() {
+        assert_eq!(app_launch_target(r#""C:\不存在的路径\ghost.exe",0"#), None);
+    }
+
+    #[test]
+    fn empty_display_icon_is_not_a_launch_target() {
+        assert_eq!(app_launch_target(""), None);
+        assert_eq!(app_launch_target("   "), None);
+    }
+
+    /// 大写 .EXE 也认：注册表里的扩展名大小写不固定。
+    #[test]
+    fn extension_case_does_not_matter() {
+        let exe = tmp_file("UPPER.EXE");
+        let raw = format!("\"{}\",0", exe.display());
+        assert_eq!(app_launch_target(&raw).as_deref(),
+                   Some(exe.to_string_lossy().as_ref()));
+    }
+
+    /// 判据是"是不是能启动的程序"，不是"有没有图标"——
+    /// 图标字段与启动目标必须各自独立成立。
+    #[test]
+    fn every_enumerated_app_has_a_consistent_launch_target() {
+        let apps = check_app2().expect("枚举已装应用失败");
+        for a in &apps {
+            match &a.launch_target {
+                Some(t) => {
+                    let p = Path::new(t);
+                    assert!(p.is_file(), "{} 的启动目标不存在：{t}", a.name);
+                    assert_eq!(
+                        p.extension().map(|e| e.eq_ignore_ascii_case("exe")),
+                        Some(true),
+                        "{} 的启动目标不是 exe：{t}", a.name
+                    );
+                }
+                // None 也必须讲得出理由：要么没图标，要么图标指向的不是 exe
+                None => assert!(
+                    a.display_icon.trim().is_empty()
+                        || !app_launch_target(&a.display_icon)
+                            .map(|t| t.ends_with(".exe") || t.ends_with(".EXE"))
+                            .unwrap_or(false),
+                    "{} 既没有启动目标，图标 {} 又像是 exe，说明判据漏了一种情况",
+                    a.name,
+                    a.display_icon
+                ),
+            }
+        }
     }
 }
