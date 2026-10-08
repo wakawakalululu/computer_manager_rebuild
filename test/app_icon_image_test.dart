@@ -23,7 +23,9 @@ void main() {
                   loader: (_) async => _blueSquare(2, 3)))));
       // 解码在 IO 线程完成后才回调挂图，整包跑测时这一步可能被拖到几百毫秒；
       // 单独跑必过、全量跑偶发失败就是这里的预算不够，不是行为变了。
-      for (var i = 0; i < 100 && find.byType(RawImage).evaluate().isEmpty; i++) {
+      for (var i = 0;
+          i < 100 && find.byType(RawImage).evaluate().isEmpty;
+          i++) {
         await tester.pump(const Duration(milliseconds: 20));
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }

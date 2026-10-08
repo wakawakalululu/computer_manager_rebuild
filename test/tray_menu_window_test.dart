@@ -32,8 +32,13 @@ void main() {
     for (final action in TrayMenuAction.values) {
       expect(find.text(action.label), findsOneWidget);
     }
-    expect(
-        TrayMenuAction.values.map((a) => a.id).toList(), ['showMain', 'quit']);
+    expect(TrayMenuAction.values.map((a) => a.id).toList(),
+        ['open', 'settings', 'hideWindow', 'closeBall', 'quit']);
+    // 前四条标签逐字取参考实现文案表（:244/:273/:258/:255），改文案要回去找证据
+    expect(TrayMenuAction.values.map((a) => a.label).take(4).toList(),
+        ['打开', '设置', '隐藏窗口', '关闭悬浮球']);
+    // 尺寸随条目数走：五条 = 32*5 + 6*2
+    expect(trayMenuLogicalSize().height, 32 * 5 + 6 * 2);
   });
 
   testWidgets('点击条目把动作原样回传', (tester) async {

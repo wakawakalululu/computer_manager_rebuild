@@ -66,6 +66,18 @@ void main() {
     );
   });
 
+  test('日志包收集失败：仍然把问题描述提交上去，只是没有附件', () async {
+    // 附件是**可选**的。收集日志失败原来会一路冒到最外层 catch → 整次提交失败，
+    // 用户写好的问题描述一起丢掉，看到的却是"提交失败"，真实原因只是"没带日志"。
+    collect = () async => throw StateError('logs 目录不可写');
+    await submitter.submit(content: '磁盘占用异常');
+
+    expect(errors.join(), contains('收集日志包失败'));
+    // 附件为 null 时**不报错**，也不该让提交失败
+    expect(infos.any((m) => m.contains('附件=无')), isTrue,
+        reason: '没带附件要如实写「无」，不能写成有');
+  });
+
   Future<void> pumpPage(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1400, 1000);
     tester.view.devicePixelRatio = 1.0;
